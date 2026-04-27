@@ -1,0 +1,22 @@
+build/
+obj_dir/
+*.fst
+*.vcd
+*.vcd.gz
+__pycache__/
+*.pyc
+.venv/
+target/
+prefix-*/
+*.o
+*.so
+*.a
+# Proteus generated RTL — regenerate with: cd designs/proteus && sbt "runMain riscv.CoreMain"
+designs/proteus/Core.v
+designs/proteus/sim/
+# Simulation trace data
+results_*/
+*.npy
+*.png
+# Tool build logs
+*.log

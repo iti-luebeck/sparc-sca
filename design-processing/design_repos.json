@@ -1,0 +1,6 @@
+{
+    "ibex": "../../designs/ibex/cellift",
+    "proteus": "../../designs/proteus/cellift",
+    "rocket": "../../designs/chipyard/cellift-rocket",
+    "boom": "../../designs/chipyard/cellift-boom"
+}

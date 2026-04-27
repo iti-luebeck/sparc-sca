@@ -1,0 +1,25 @@
+# CellIFT Power Leakage Analysis Requirements
+
+# VCD/FST file reading
+vcdvcd>=3.1.1
+
+# Numerical computing
+numpy>=1.21.0
+
+# Statistical analysis
+scipy>=1.7.0
+
+# Data analysis
+pandas>=1.3.0
+
+# Plotting and visualization
+matplotlib>=3.4.0
+
+# Progress bars
+tqdm>=4.62.0
+
+# Data serialization (for saving results)
+PyYAML>=5.4.0
+
+# Optional: For advanced statistical tests
+scikit-learn>=0.24.0
