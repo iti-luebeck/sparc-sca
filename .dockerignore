@@ -1,0 +1,59 @@
+# Git metadata — large and not needed for any COPY instruction
+.git
+**/.git
+
+# ── Design submodules — not COPYed in Dockerfile ─────────────────────────────
+designs/
+
+# ── Tool submodules not built from source in Docker ──────────────────────────
+# (using apt RISC-V toolchain instead of building from source)
+tools/riscv-gnu-toolchain/
+# (using pre-built sv2v binary)
+tools/sv2v/
+# (GTKWave is a GUI tool; headless container doesn't need it)
+tools/gtkwave/
+
+# ── Host build artifacts ──────────────────────────────────────────────────────
+tools/*/build/
+tools/*/obj_dir/
+tools/*/*.o
+tools/*/*.so
+tools/*/*.a
+# Yosys in-tree build artifacts
+tools/sparc-sca-yosys/yosys
+tools/sparc-sca-yosys/yosys-abc
+tools/sparc-sca-yosys/*.o
+tools/sparc-sca-yosys/abc/
+# Verilator in-tree build
+tools/verilator/src/*.o
+tools/verilator/src/obj_opt/
+
+# ── Rust / Cargo caches ───────────────────────────────────────────────────────
+**/target/
+**/.cargo/
+
+# ── Python caches ─────────────────────────────────────────────────────────────
+**/__pycache__/
+**/*.pyc
+**/.venv/
+python-experiments/.venv/
+
+# ── Simulation traces and large data files ────────────────────────────────────
+**/*.fst
+**/*.vcd
+**/*.vcd.gz
+**/results_*/
+**/*.npy
+
+# ── Paper / figures ───────────────────────────────────────────────────────────
+paper/
+**/*.png
+**/*.pdf
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+**/*.log
+tools/log/
+
+# ── Proteus generated RTL (large) ────────────────────────────────────────────
+designs/proteus/Core.v
+designs/proteus/sim/
