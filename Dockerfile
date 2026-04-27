@@ -36,6 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Spike (riscv-isa-sim)
     device-tree-compiler \
     libboost-regex-dev libboost-system-dev \
+    # bender — libgit2-sys uses system libgit2 when libgit2-dev is present
+    libgit2-dev \
     # Python (for venv + Yosys helpers)
     python3 python3-dev python3-pip python3-venv \
   && rm -rf /var/lib/apt/lists/*
@@ -47,7 +49,7 @@ RUN mkdir -p ${PREFIX}/bin ${PREFIX}/riscv
 ENV CARGO_HOME=${PREFIX}/.cargo \
     RUSTUP_HOME=${PREFIX}/.rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain 1.83.0 --no-modify-path
+    | sh -s -- -y --default-toolchain stable --no-modify-path
 ENV PATH=${PREFIX}/.cargo/bin:${PATH}
 
 # ── Spike — RISC-V ISA simulator ─────────────────────────────────────────────
@@ -80,9 +82,9 @@ RUN cd /build/verilator && \
 RUN curl -fsSL \
       https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip \
       -o /tmp/sv2v.zip && \
-    unzip /tmp/sv2v.zip sv2v -d /tmp && \
-    install -m 755 /tmp/sv2v ${PREFIX}/bin/sv2v && \
-    rm /tmp/sv2v.zip /tmp/sv2v
+    unzip -j /tmp/sv2v.zip -d /tmp/sv2v-bin && \
+    install -m 755 /tmp/sv2v-bin/sv2v ${PREFIX}/bin/sv2v && \
+    rm -rf /tmp/sv2v.zip /tmp/sv2v-bin
 
 # ── morty — SystemVerilog pickler (Rust) ─────────────────────────────────────
 COPY tools/morty/ /build/morty/
@@ -91,11 +93,11 @@ RUN cargo install --path /build/morty --root ${PREFIX} && \
 
 # ── bender — RTL dependency manager (Rust) ───────────────────────────────────
 COPY tools/bender/ /build/bender/
-RUN cargo install --path /build/bender --root ${PREFIX} && \
+RUN LIBGIT2_SYS_USE_PKG_CONFIG=1 \
+    cargo install --path /build/bender --root ${PREFIX} && \
     rm -rf /build/bender ~/.cargo/registry ~/.cargo/git
 
 # ── Python virtual environment ───────────────────────────────────────────────
-COPY tools/ibex-python-requirements.txt       /build/ibex-req.txt
 COPY design-processing/python-requirements.txt /build/dp-req.txt
 COPY python-experiments/power_leakage_analysis/requirements.txt /build/power-req.txt
 
