@@ -92,10 +92,11 @@ RUN cargo install --path /build/morty --root ${PREFIX} && \
     rm -rf /build/morty
 
 # ── bender — RTL dependency manager (Rust) ───────────────────────────────────
-COPY tools/bender/ /build/bender/
+# Install from crates.io at the pinned version (local submodule path triggers
+# a cmake/libgit2 build-script failure that the published crate avoids).
 RUN LIBGIT2_SYS_USE_PKG_CONFIG=1 \
-    cargo install --path /build/bender --root ${PREFIX} && \
-    rm -rf /build/bender ~/.cargo/registry ~/.cargo/git
+    cargo install bender --version 0.28.2 --root ${PREFIX} && \
+    rm -rf ~/.cargo/registry ~/.cargo/git
 
 # ── Python virtual environment ───────────────────────────────────────────────
 COPY design-processing/python-requirements.txt /build/dp-req.txt
