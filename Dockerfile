@@ -107,8 +107,8 @@ RUN python3 -m venv ${PREFIX}/python-venv && \
     # Core tooling
     ${PREFIX}/python-venv/bin/pip install --quiet \
         fusesoc==1.12.0 \
-        ninja==1.10.2 \
-        edalize && \
+        "edalize<0.5" \
+        ninja==1.10.2 && \
     # Design-processing helpers
     ${PREFIX}/python-venv/bin/pip install --quiet -r /build/dp-req.txt && \
     # Power-leakage analysis stack
@@ -134,6 +134,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-dev python3-venv \
     # RISC-V bare-metal toolchain (covers both RV32 and RV64 targets)
     gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf \
+    # C++ compiler — Verilator generates C++ and calls g++ to compile it
+    g++ \
     # Build infrastructure needed when running experiments
     make ninja-build git curl wget perl \
     # Misc utilities
