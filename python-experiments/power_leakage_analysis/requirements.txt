@@ -1,7 +1,7 @@
 # CellIFT Power Leakage Analysis Requirements
 
 # VCD/FST file reading
-vcdvcd>=3.1.1
+vcdvcd>=2.0.0
 
 # Numerical computing
 numpy>=1.21.0
