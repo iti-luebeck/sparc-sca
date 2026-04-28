@@ -90,6 +90,8 @@ checkout-designs:
 	git -C designs/chipyard submodule update --init generators/ibex
 	git -C designs/chipyard submodule update --init generators/nvdla
 	git -C designs/chipyard submodule update --init generators/cva6
+	git -C designs/chipyard submodule update --init --force tools/dsptools
+	git -C designs/chipyard submodule update --init --force tools/rocket-dsp-utils
 
 checkout-tools:
 	git submodule update --init --recursive tools/sparc-sca-yosys
