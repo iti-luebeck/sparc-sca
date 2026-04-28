@@ -1,4 +1,5 @@
 # Copyright 2022 Flavien Solt, ETH Zurich.
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
 # Licensed under the General Public License, Version 3.0, see LICENSE for details.
 # SPDX-License-Identifier: GPL-3.0-only
 

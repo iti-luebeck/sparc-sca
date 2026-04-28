@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
+
 #!/usr/bin/env python3
 """
 Detect computation end cycle from CellIFT leakage CSV traces.

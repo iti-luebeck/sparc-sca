@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
+
 # SPARC-SCA: Power Side-Channel Analysis Framework
 # Based on CellIFT (ETH Zurich) with significant extensions.
 

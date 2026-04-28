@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
+
 # SPARC-SCA Docker Image
 # Two-stage build: 'builder' compiles all tools, 'runtime' ships only binaries.
 #

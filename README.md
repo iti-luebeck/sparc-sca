@@ -162,3 +162,21 @@ All tools are git submodules and are built either via `make installtools` or ins
 ## Acknowledgements
 
 This work builds on [CellIFT](https://comsec.ethz.ch/research/microarch/cellift/) by Flavien Solt and Kaveh Razavi (ETH Zurich). The evaluated processor designs are [Ibex](https://github.com/lowRISC/ibex) (lowRISC / OpenTitan), [Proteus](https://github.com/proteus-core/proteus) (proteus-core), and [Rocket Chip](https://github.com/chipsalliance/rocket-chip) via [Chipyard](https://github.com/ucb-bar/chipyard) (UC Berkeley).
+
+## License
+
+The SPARC-SCA framework is licensed under **GPL-3.0-only**.
+Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck.
+
+The framework incorporates GPL-3.0-only code from the
+[CellIFT project](https://github.com/comsec-group/cellift-meta)
+(Copyright 2022 Flavien Solt, ETH Zurich).
+
+The Yosys instrumentation pass (`tools/sparc-sca-yosys/passes/cellift/`)
+is licensed under the **ISC License**, derived from the CellIFT Yosys pass
+(Copyright 2020 Alberto Gonzalez & Flavien Solt).
+
+The simulation wrapper (`simulation/wrappers/ibex_tiny_soc_with_leakage.sv`)
+is licensed under **Apache-2.0** (Copyright lowRISC contributors).
+
+Tool and design submodules carry their own licenses (see each subdirectory).

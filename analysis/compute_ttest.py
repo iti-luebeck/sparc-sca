@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
+
 #!/usr/bin/env python3
 """
 Welch's t-test for Leakage Quantification (Phase 6B)
