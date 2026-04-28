@@ -69,20 +69,27 @@ checkout-designs:
 	git submodule update --init --recursive designs/ibex
 	git submodule update --init --depth 1 external-dependencies/cellift-opentitan
 	git submodule update --init --recursive designs/proteus
-	# Init chipyard top-level only — avoids BOOM, Gemmini, FireSim, toolchains, VLSI, etc.
+	# Init chipyard top-level and all generator submodules needed to compile the Scala.
+	# Toolchains, VLSI plugins, FireSim, and FPGA targets are skipped (not needed for RTL gen).
 	git submodule update --init designs/chipyard
-	# Init only the sub-submodules required for Rocket RTL generation.
-	# rocket-chip is initialized recursively because it nests hardfloat, macros,
-	# and api-config-chipsalliance as further submodules.
+	# rocket-chip is initialized recursively (hardfloat, macros, api-config-chipsalliance).
 	git -C designs/chipyard submodule update --init --recursive generators/rocket-chip
-	git -C designs/chipyard submodule update --init generators/testchipip
-	git -C designs/chipyard submodule update --init generators/sifive-blocks
-	git -C designs/chipyard submodule update --init tools/barstools
-	git -C designs/chipyard submodule update --init tools/api-config-chipsalliance
-	# common.mk unconditionally includes nvdla.mk and cva6.mk — init shallow
-	# so the .mk stubs exist (we don't build these generators for Rocket).
-	git -C designs/chipyard submodule update --init --depth 1 generators/nvdla
-	git -C designs/chipyard submodule update --init --depth 1 generators/cva6
+	git -C designs/chipyard submodule update --init --force generators/testchipip
+	git -C designs/chipyard submodule update --init --force generators/sifive-blocks
+	git -C designs/chipyard submodule update --init --force tools/barstools
+	git -C designs/chipyard submodule update --init --force tools/api-config-chipsalliance
+	# All generator submodules referenced in chipyard Scala sources.
+	git -C designs/chipyard submodule update --init generators/boom
+	git -C designs/chipyard submodule update --init generators/hwacha
+	git -C designs/chipyard submodule update --init generators/icenet
+	git -C designs/chipyard submodule update --init generators/sifive-cache
+	git -C designs/chipyard submodule update --init generators/sha3
+	git -C designs/chipyard submodule update --init generators/gemmini
+	git -C designs/chipyard submodule update --init generators/fft-generator
+	git -C designs/chipyard submodule update --init generators/riscv-sodor
+	git -C designs/chipyard submodule update --init generators/ibex
+	git -C designs/chipyard submodule update --init generators/nvdla
+	git -C designs/chipyard submodule update --init generators/cva6
 
 checkout-tools:
 	git submodule update --init --recursive tools/sparc-sca-yosys
