@@ -79,6 +79,10 @@ checkout-designs:
 	git -C designs/chipyard submodule update --init generators/sifive-blocks
 	git -C designs/chipyard submodule update --init tools/barstools
 	git -C designs/chipyard submodule update --init tools/api-config-chipsalliance
+	# common.mk unconditionally includes nvdla.mk and cva6.mk — init shallow
+	# so the .mk stubs exist (we don't build these generators for Rocket).
+	git -C designs/chipyard submodule update --init --depth 1 generators/nvdla
+	git -C designs/chipyard submodule update --init --depth 1 generators/cva6
 
 checkout-tools:
 	git submodule update --init --recursive tools/sparc-sca-yosys
