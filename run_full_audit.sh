@@ -45,9 +45,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_SH="${SCRIPT_DIR}/env.sh"
 
-IBEX_DIR="/mnt/nvme1n1p1/cellift-designs/cellift-ibex/cellift"
-PROTEUS_DIR="/mnt/nvme1n1p1/cellift-designs/cellift-proteus/cellift"
-ROCKET_DIR="/mnt/nvme1n1p1/cellift-designs/cellift-chipyard/cellift-rocket"
+# Design directories — default to repo-relative paths (correct for Docker and
+# for the unified sparc-sca repo layout).  Override by exporting IBEX_DIR,
+# PROTEUS_DIR, or ROCKET_DIR before invoking this script (or via env.sh).
+: "${IBEX_DIR:=${SCRIPT_DIR}/designs/ibex/cellift}"
+: "${PROTEUS_DIR:=${SCRIPT_DIR}/designs/proteus/cellift}"
+: "${ROCKET_DIR:=${SCRIPT_DIR}/designs/chipyard/cellift-rocket}"
 
 JOBS=8
 AES_SIMLEN=30000
@@ -118,14 +121,27 @@ echo "  skip    : audit=${SKIP_AUDIT} clean=${SKIP_CLEAN} build=${SKIP_BUILD} ev
 echo "==================================================================="
 echo ""
 
-# ── Source env.sh ─────────────────────────────────────────────────────────────
-if [[ ! -f "$ENV_SH" ]]; then
-    echo "FATAL: env.sh not found at ${ENV_SH}"
+# ── Source env.sh (native only) ───────────────────────────────────────────────
+# Skip if: already sourced (user ran `source env.sh` first), or running inside
+# Docker (/.dockerenv is created by the Docker runtime in every container).
+if [[ "${CELLIFT_ENV_SOURCED:-}" == "yes" ]]; then
+    echo "env already configured (CELLIFT_ENV_SOURCED=yes)"
+elif [[ -f "/.dockerenv" ]]; then
+    echo "Docker environment detected — skipping env.sh (tools pre-installed)"
+elif [[ -f "$ENV_SH" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_SH"
+    echo "env.sh sourced (CELLIFT_ENV_SOURCED=${CELLIFT_ENV_SOURCED:-})"
+else
+    echo "FATAL: env.sh not found at ${ENV_SH} and not running in Docker"
     exit 1
 fi
-# shellcheck source=/dev/null
-source "$ENV_SH"
-echo "env.sh sourced (CELLIFT_ENV_SOURCED=${CELLIFT_ENV_SOURCED:-})"
+
+# OPENTITAN_ROOT: needed by the Ibex Makefile (CURR_OPENTITAN_ROOT).
+# env.sh sets it on native; default to the repo-relative path in Docker.
+: "${OPENTITAN_ROOT:=${SCRIPT_DIR}/external-dependencies/cellift-opentitan}"
+export OPENTITAN_ROOT
+echo "  OPENTITAN_ROOT : ${OPENTITAN_ROOT}"
 echo ""
 
 # ── Helper functions ──────────────────────────────────────────────────────────
@@ -522,78 +538,53 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
     banner "Phase 2 — Build Simulators"
 
     # ── Ibex ──────────────────────────────────────────────────────────────────
-    # Full instrumentation + required simulator builds.
-    # Instrumentation: before_instrumentation + vanilla + cellift.
-    # Build: csvlog (TVLA), cellift_trace (signal attribution), vanilla_trace
-    # (instruction correlation). build_csvlog_sim.sh uses FuseSoC with the
-    # extra --cores-root args for Ibex + OpenTitan; make targets handle the rest.
+    # Instrumentation: before_instrumentation → vanilla.sv → cellift.sv (Yosys).
+    # Simulator builds: all four evaluation targets via Makefile rules.
     banner "Phase 2.1 — Ibex"
     (
         cd "$IBEX_DIR"
-        timed_step_logged "ibex:instr:before"        "${BUILD_EVAL_DIR}/build--ibex--instr-before.log"        make before_instrumentation
-        timed_step_logged "ibex:instr:vanilla"       "${BUILD_EVAL_DIR}/build--ibex--instr-vanilla.log"       make generated/out/vanilla.sv
-        timed_step_logged "ibex:instr:cellift"       "${BUILD_EVAL_DIR}/build--ibex--instr-cellift.log"       make generated/out/cellift.sv
-        timed_step_logged "ibex:build:csvlog"        "${BUILD_EVAL_DIR}/build--ibex--csvlog.log"        ./build_csvlog_sim.sh --force
-        timed_step_logged "ibex:build:fasttrace"     "${BUILD_EVAL_DIR}/build--ibex--fasttrace.log"     ./build_fasttrace_sim.sh --force
-        timed_step_logged "ibex:build:vanilla_trace"     "${BUILD_EVAL_DIR}/build--ibex--vanilla-trace.log"     make prepare_vanilla_trace
-        timed_step_logged "ibex:build:vanilla_trace_fst" "${BUILD_EVAL_DIR}/build--ibex--vanilla-trace-fst.log" make prepare_vanilla_trace_fst
+        timed_step_logged "ibex:instr:before"            "${BUILD_EVAL_DIR}/build--ibex--instr-before.log"        make before_instrumentation
+        timed_step_logged "ibex:instr:vanilla"           "${BUILD_EVAL_DIR}/build--ibex--instr-vanilla.log"       make generated/out/vanilla.sv
+        timed_step_logged "ibex:instr:cellift"           "${BUILD_EVAL_DIR}/build--ibex--instr-cellift.log"       make generated/out/cellift.sv
+        timed_step_logged "ibex:build:csvlog"            "${BUILD_EVAL_DIR}/build--ibex--csvlog.log"              make build/run_cellift_csvlog_0.1/default-verilator/Vibex_tiny_soc
+        timed_step_logged "ibex:build:fasttrace"         "${BUILD_EVAL_DIR}/build--ibex--fasttrace.log"           make build/run_cellift_fasttrace_0.1/default-verilator/Vibex_tiny_soc
+        timed_step_logged "ibex:build:vanilla_trace"     "${BUILD_EVAL_DIR}/build--ibex--vanilla-trace.log"       make build/run_vanilla_trace_0.1/default-verilator/Vibex_tiny_soc
+        timed_step_logged "ibex:build:vanilla_trace_fst" "${BUILD_EVAL_DIR}/build--ibex--vanilla-trace-fst.log"   make build/run_vanilla_trace_fst_0.1/default-verilator/Vibex_tiny_soc
     )
 
     # ── Proteus ───────────────────────────────────────────────────────────────
     if [[ "$ONLY_IBEX" -eq 0 ]]; then
-    # No Makefile/Yosys instrumentation entrypoint in cellift-proteus/cellift.
-    # We time and enforce availability of pre-generated generated/out/cellift.sv.
-    # Simulator builds are driven directly through FuseSoC.
-    # Required: csvlog (TVLA), fasttrace (signal attribution), vanilla_trace.
-    # Each build resets fusesoc.conf to avoid stale library entries.
+    # Proteus: Core.v is generated from SpinalHDL if absent (requires sbt + Java 17).
+    # Instrumentation: before_instrumentation -> vanilla.sv -> cellift.sv (Yosys + compaction).
+    # Simulator builds: all five evaluation targets via Makefile rules.
     banner "Phase 2.2 — Proteus"
     (
         cd "$PROTEUS_DIR"
-
-        check_proteus_instrumentation() {
-            if [[ -f generated/out/cellift.sv ]]; then
-                echo "Using existing Proteus instrumented RTL: generated/out/cellift.sv"
-                return 0
-            fi
-            echo "ERROR: generated/out/cellift.sv is missing."
-            echo "ERROR: No in-repo Proteus Yosys instrumentation target was found in cellift-proteus/cellift."
-            echo "ERROR: Generate generated/out/cellift.sv externally, then rerun."
-            return 1
-        }
-
-        build_proteus_target() {
-            local target="$1"
-            rm -f fusesoc.conf
-            fusesoc library add "$target" .
-            fusesoc --cores-root=. run --build "$target"
-        }
-
-        timed_step "proteus:instr:availability" check_proteus_instrumentation
-        timed_step_logged "proteus:build:csvlog"        "${BUILD_EVAL_DIR}/build--proteus--csvlog.log"        build_proteus_target run_cellift_csvlog
-        timed_step_logged "proteus:build:fasttrace"     "${BUILD_EVAL_DIR}/build--proteus--fasttrace.log"     build_proteus_target run_cellift_fasttrace
-        timed_step_logged "proteus:build:fasttrace_fst" "${BUILD_EVAL_DIR}/build--proteus--fasttrace-fst.log" build_proteus_target run_cellift_fasttrace_fst
-        timed_step_logged "proteus:build:vanilla_trace"     "${BUILD_EVAL_DIR}/build--proteus--vanilla-trace.log"     build_proteus_target run_vanilla_trace
-        timed_step_logged "proteus:build:vanilla_trace_fst" "${BUILD_EVAL_DIR}/build--proteus--vanilla-trace-fst.log" build_proteus_target run_vanilla_trace_fst
+        timed_step_logged "proteus:instr:before"         "${BUILD_EVAL_DIR}/build--proteus--instr-before.log"     make before_instrumentation
+        timed_step_logged "proteus:instr:cellift"        "${BUILD_EVAL_DIR}/build--proteus--instr-cellift.log"    make generated/out/cellift.sv
+        timed_step_logged "proteus:build:csvlog"         "${BUILD_EVAL_DIR}/build--proteus--csvlog.log"           make build/run_cellift_csvlog_0.1/default-verilator/Vproteus_tiny_soc
+        timed_step_logged "proteus:build:fasttrace"      "${BUILD_EVAL_DIR}/build--proteus--fasttrace.log"        make build/run_cellift_fasttrace_0.1/default-verilator/Vproteus_tiny_soc
+        timed_step_logged "proteus:build:fasttrace_fst"  "${BUILD_EVAL_DIR}/build--proteus--fasttrace-fst.log"    make build/run_cellift_fasttrace_fst_0.1/default-verilator/Vproteus_tiny_soc
+        timed_step_logged "proteus:build:vanilla_trace"  "${BUILD_EVAL_DIR}/build--proteus--vanilla-trace.log"    make build/run_vanilla_trace_0.1/default-verilator/Vproteus_tiny_soc
+        timed_step_logged "proteus:build:vanilla_trace_fst" "${BUILD_EVAL_DIR}/build--proteus--vanilla-trace-fst.log" make build/run_vanilla_trace_fst_0.1/default-verilator/Vproteus_tiny_soc
     )
     fi
 
     # ── Rocket ────────────────────────────────────────────────────────────────
     if [[ "$ONLY_IBEX" -eq 0 ]]; then
-    # Full instrumentation + required simulator builds.
-    # Instrumentation: before_instrumentation + vanilla + cellift.
-    # Build: csvlog (TVLA), cellift_trace (signal attribution), vanilla_trace.
-    # build_csvlog_sim.sh handles the csvlog FuseSoC invocation; make for the rest.
+    # Instrumentation: before_instrumentation → vanilla.sv → cellift.sv (Yosys + compaction).
+    # Simulator builds: all five evaluation targets via Makefile rules.
     banner "Phase 2.3 — Rocket"
     (
         cd "$ROCKET_DIR"
-        timed_step_logged "rocket:instr:before"        "${BUILD_EVAL_DIR}/build--rocket--instr-before.log"        make before_instrumentation
-        timed_step_logged "rocket:instr:vanilla"       "${BUILD_EVAL_DIR}/build--rocket--instr-vanilla.log"       make generated/out/vanilla.sv
-        timed_step_logged "rocket:instr:cellift"       "${BUILD_EVAL_DIR}/build--rocket--instr-cellift.log"       make generated/out/cellift.sv
-        timed_step_logged "rocket:build:csvlog"        "${BUILD_EVAL_DIR}/build--rocket--csvlog.log"        ./build_csvlog_sim.sh --force
-        timed_step_logged "rocket:build:fasttrace"     "${BUILD_EVAL_DIR}/build--rocket--fasttrace.log"     ./build_fasttrace_sim.sh --force
-        timed_step_logged "rocket:build:fasttrace_fst" "${BUILD_EVAL_DIR}/build--rocket--fasttrace-fst.log" ./build_fasttrace_fst_sim.sh --force
-        timed_step_logged "rocket:build:vanilla_trace"     "${BUILD_EVAL_DIR}/build--rocket--vanilla-trace.log"     make prepare_vanilla_trace
-        timed_step_logged "rocket:build:vanilla_trace_fst" "${BUILD_EVAL_DIR}/build--rocket--vanilla-trace-fst.log" make prepare_vanilla_trace_fst
+        timed_step_logged "rocket:instr:before"              "${BUILD_EVAL_DIR}/build--rocket--instr-before.log"        make before_instrumentation
+        timed_step_logged "rocket:instr:vanilla"             "${BUILD_EVAL_DIR}/build--rocket--instr-vanilla.log"       make generated/out/vanilla.sv
+        timed_step_logged "rocket:instr:cellift"             "${BUILD_EVAL_DIR}/build--rocket--instr-cellift.log"       make generated/out/cellift.sv
+        timed_step_logged "rocket:build:csvlog"              "${BUILD_EVAL_DIR}/build--rocket--csvlog.log"              make build/run_cellift_csvlog_0.1/default-verilator/Vtop_tiny_soc
+        timed_step_logged "rocket:build:fasttrace"           "${BUILD_EVAL_DIR}/build--rocket--fasttrace.log"           make build/run_cellift_fasttrace_0.1/default-verilator/Vtop_tiny_soc
+        timed_step_logged "rocket:build:fasttrace_fst"       "${BUILD_EVAL_DIR}/build--rocket--fasttrace-fst.log"       make build/run_cellift_fasttrace_fst_0.1/default-verilator/Vtop_tiny_soc
+        timed_step_logged "rocket:build:vanilla_trace"       "${BUILD_EVAL_DIR}/build--rocket--vanilla-trace.log"       make build/run_vanilla_trace_0.1/default-verilator/Vtop_tiny_soc
+        timed_step_logged "rocket:build:vanilla_trace_fst"   "${BUILD_EVAL_DIR}/build--rocket--vanilla-trace-fst.log"   make build/run_vanilla_trace_fst_0.1/default-verilator/Vtop_tiny_soc
     )
     fi
 fi

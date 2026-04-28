@@ -1,40 +1,126 @@
-# Copyright 2022 Flavien Solt, ETH Zurich.
-# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
-# Licensed under the General Public License, Version 3.0, see LICENSE for details.
 # SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
 
-# This Makefile manages the repository and the submodule hierarchy.
+SHELL := /bin/bash
 
-SHELL := /bin/bash # Need this for associative arrays
-
-# Docker targets are exempt from the env.sh requirement.
-ifeq (,$(filter docker-build docker-run docker-run-ro,$(MAKECMDGOALS)))
+# checkout-designs and checkout-tools work without env.sh (host-side git ops).
+# Docker targets never need env.sh.
+# generate-rtl calls sbt/Java directly — no CellIFT env required.
+EXEMPT_TARGETS := docker-build docker-run docker-run-ro checkout-designs checkout-tools generate-rtl
+ifeq (,$(filter $(EXEMPT_TARGETS),$(MAKECMDGOALS)))
 ifndef CELLIFT_ENV_SOURCED
-$(error Please re-source env.sh first, see README.md)
+$(error Please source env.sh first — see README.md)
 endif
 ifneq "$(CELLIFT_ENV_VERSION)" "1"
-$(error Current env.sh out of date, please source env.sh again, see README.md)
+$(error env.sh is out of date — please source env.sh again)
 endif
 endif
 
 DOCKER_IMAGE ?= sparc-sca
 DOCKER_TAG   ?= latest
 
-default-target:
-	@echo "Usage:"
-	@echo "    make installtools    - build riscv toolchain, morty, bender,"
-	@echo "                           verilator, sv2v and other tools and install"
-	@echo "                           in $(PREFIX_CELLIFT)"
-	@echo "    make cleantools      - clean build tree of tools and delete"
-	@echo "                           $(PREFIX_CELLIFT)"
-	@echo "    make pull            - do git pull for current repo and update submodules"
-	@echo "    make docker-build    - build the Docker image (no env.sh required)"
-	@echo "    make docker-run      - start interactive shell with repo mounted"
-	@echo "    make docker-run-ro   - same but mount read-only (safe for exploration)"
+# ── Default target ────────────────────────────────────────────────────────────
+.PHONY: help
+help:
+	@echo "SPARC-SCA build targets"
+	@echo ""
+	@echo "  Submodule checkout (run on host, no env.sh required):"
+	@echo "    make checkout-designs   init design submodules (ibex, proteus, chipyard)"
+	@echo "    make checkout-tools     init tool submodules (yosys, verilator, sv2v, …)"
+	@echo ""
+	@echo "  RTL generation (no env.sh required; run on host or inside Docker):"
+	@echo "    make generate-rtl       generate Proteus (SpinalHDL) and Rocket (Chisel)"
+	@echo "                            Verilog RTL from source; requires Java 17 + sbt"
+	@echo "                            Only needed when Scala/SpinalHDL sources change;"
+	@echo "                            run_full_audit.sh triggers this automatically."
+	@echo ""
+	@echo "  Tools (requires env.sh):"
+	@echo "    make installtools       build all tools into \$$(PREFIX_CELLIFT)"
+	@echo "    make cleantools         delete tool build tree and \$$(PREFIX_CELLIFT)"
+	@echo ""
+	@echo "  Simulator builds (requires env.sh; runs RTL instrumentation + Verilator):"
+	@echo "    make build-sims         build all three designs"
+	@echo "    make build-ibex         build Ibex simulators only"
+	@echo "    make build-proteus      build Proteus simulators only"
+	@echo "    make build-rocket       build Rocket simulators only"
+	@echo ""
+	@echo "  Clean:"
+	@echo "    make clean-designs      clean build/ results/ traces/ in each design"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    make docker-build       build the sparc-sca Docker image"
+	@echo "    make docker-run         start interactive shell with repo mounted (rw)"
+	@echo "    make docker-run-ro      start interactive shell with repo mounted (ro)"
 
-# ── Docker targets (do NOT require env.sh to be sourced) ─────────────────────
+# ── RTL generation (host or inside Docker, no env.sh needed) ──────────────────
+# Runs SpinalHDL and Chisel/FIRRTL elaboration to produce the design Verilog.
+# run_full_audit.sh triggers this automatically via Makefile dependencies, so
+# you only need to call this explicitly when Scala/SpinalHDL sources change.
+.PHONY: generate-rtl
+generate-rtl:
+	@echo "Generating Proteus RTL from SpinalHDL sources (requires Java 17 + sbt)..."
+	cd designs/proteus && sbt "runMain riscv.CoreDynamicExtMem"
+	@echo "Generating Rocket RTL from Chisel/FIRRTL sources (requires Java 8+ + sbt)..."
+	$(MAKE) -C designs/chipyard/sims/verilator verilog CONFIG=MySmallVMRocketConfig
+
+# ── Submodule checkout (host-only, no env.sh needed) ─────────────────────────
+.PHONY: checkout-designs checkout-tools
+checkout-designs:
+	git submodule update --init --recursive designs/ibex
+	git submodule update --init --depth 1 external-dependencies/cellift-opentitan
+	git submodule update --init --recursive designs/proteus
+	# Init chipyard top-level only — avoids BOOM, Gemmini, FireSim, toolchains, VLSI, etc.
+	git submodule update --init designs/chipyard
+	# Init only the sub-submodules required for Rocket RTL generation.
+	# rocket-chip is initialized recursively because it nests hardfloat, macros,
+	# and api-config-chipsalliance as further submodules.
+	git -C designs/chipyard submodule update --init --recursive generators/rocket-chip
+	git -C designs/chipyard submodule update --init generators/testchipip
+	git -C designs/chipyard submodule update --init generators/sifive-blocks
+	git -C designs/chipyard submodule update --init tools/barstools
+	git -C designs/chipyard submodule update --init tools/api-config-chipsalliance
+
+checkout-tools:
+	git submodule update --init --recursive tools/sparc-sca-yosys
+	git submodule update --init --recursive tools/verilator
+	git submodule update --init --recursive tools/sv2v
+	git submodule update --init --recursive tools/morty
+	git submodule update --init --recursive tools/bender
+	git submodule update --init --recursive tools/riscv-gnu-toolchain
+	git submodule update --init --recursive tools/riscv-isa-sim
+
+# ── Simulator builds ──────────────────────────────────────────────────────────
+# Each design's Makefile resolves the full dependency chain:
+#   preprocessing → Yosys instrumentation → Verilator + FuseSoC compilation
+.PHONY: build-sims build-ibex build-proteus build-rocket
+build-sims: build-ibex build-proteus build-rocket
+
+build-ibex:
+	$(MAKE) -C designs/ibex/cellift build-eval-sims
+
+build-proteus:
+	$(MAKE) -C designs/proteus/cellift build-eval-sims
+
+build-rocket:
+	$(MAKE) -C designs/chipyard/cellift-rocket build-eval-sims
+
+# ── Clean ─────────────────────────────────────────────────────────────────────
+.PHONY: clean-designs
+clean-designs:
+	$(MAKE) -C designs/ibex/cellift clean
+	$(MAKE) -C designs/proteus/cellift clean
+	$(MAKE) -C designs/chipyard/cellift-rocket clean
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
+.PHONY: installtools cleantools
+installtools:
+	$(MAKE) -C tools installtools
+
+cleantools:
+	$(MAKE) -C tools cleantools
+
+# ── Docker ────────────────────────────────────────────────────────────────────
 .PHONY: docker-build docker-run docker-run-ro
-
 docker-build:
 	docker build \
 	  --build-arg JOBS=$$(nproc) \
@@ -44,6 +130,9 @@ docker-build:
 docker-run:
 	docker run -it --rm \
 	  -v $$(pwd):/workspace \
+	  -v sparc-sca-sbt-cache:/root/.sbt \
+	  -v sparc-sca-ivy2-cache:/root/.ivy2 \
+	  -v sparc-sca-coursier-cache:/root/.cache/coursier \
 	  -e CELLIFT_JOBS=$$(nproc) \
 	  $(DOCKER_IMAGE):$(DOCKER_TAG)
 
@@ -51,25 +140,3 @@ docker-run-ro:
 	docker run -it --rm \
 	  -v $$(pwd):/workspace:ro \
 	  $(DOCKER_IMAGE):$(DOCKER_TAG)
-
-pull:
-	git submodule update --jobs $(CELLIFT_JOBS) --init --recursive
-
-clean-designs:
-	for design in $(DESIGNS); \
-	do	 \
-     	make -C designs/$$design/cellift clean; \
-	done
-
-update-designs:
-	for design in $(DESIGNS); \
-	do	 \
-     	( cd designs/$$design && git checkout master && echo $$design && git pull --rebase ) \
-	done
-	( cd cellift-paper && git checkout master && git pull --rebase && git push )
-
-installtools:
-	make -C tools installtools
-
-cleantools:
-	make -C tools cleantools

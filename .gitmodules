@@ -25,6 +25,11 @@
 [submodule "designs/ibex"]
 	path = designs/ibex
 	url = https://github.com/aneskovic/sparc-sca-ibex.git
+[submodule "external-dependencies/cellift-opentitan"]
+	path = external-dependencies/cellift-opentitan
+	url = https://github.com/comsec-group/cellift-opentitan.git
+	branch = cellift
+	shallow = true
 [submodule "designs/proteus"]
 	path = designs/proteus
 	url = https://github.com/aneskovic/sparc-sca-proteus.git

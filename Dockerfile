@@ -142,19 +142,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build infrastructure needed when running experiments
     make ninja-build git curl wget perl \
     # Misc utilities
-    ca-certificates unzip \
+    ca-certificates unzip gnupg \
+  && rm -rf /var/lib/apt/lists/*
+
+# ── Java + sbt ────────────────────────────────────────────────────────────────
+# Required for:
+#   - Proteus: SpinalHDL elaboration  (sbt "runMain riscv.CoreDynamicExtMem")
+#   - Rocket:  Chisel/FIRRTL elaboration (make verilog CONFIG=MySmallVMRocketConfig)
+RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
+      | gpg --no-default-keyring --keyring gnupg-ring:/etc/apt/trusted.gpg.d/sbt.gpg --import \
+  && chmod 644 /etc/apt/trusted.gpg.d/sbt.gpg \
+  && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" > /etc/apt/sources.list.d/sbt.list \
+  && apt-get update && apt-get install -y --no-install-recommends \
+      default-jdk \
+      sbt \
+      # dtc: needed to compile the Chipyard bootrom during FIRRTL elaboration
+      device-tree-compiler \
   && rm -rf /var/lib/apt/lists/*
 
 # ── Copy the installed tool prefix from the builder ──────────────────────────
 COPY --from=builder ${PREFIX} ${PREFIX}
 
-# ── RV32 compatibility symlinks ───────────────────────────────────────────────
-# The design Makefiles call riscv32-unknown-elf-{gcc,objdump,...}.
-# The Ubuntu package ships riscv64-unknown-elf-* which compiles RV32 code
-# correctly when the Makefiles pass -march=rv32imc -mabi=ilp32.
+# ── RV32 compatibility symlinks + $RISCV/bin symlinks ────────────────────────
+# riscv32-unknown-elf-*: design Makefiles call these names for RV32 targets.
+# $RISCV/bin/riscv64-unknown-elf-*: Chipyard's bootrom Makefile resolves the
+#   compiler as $(RISCV)/bin/riscv64-unknown-elf-gcc.
 RUN for t in gcc cpp ld ar nm as objcopy objdump strip readelf size; do \
       src="/usr/bin/riscv64-unknown-elf-${t}"; \
-      [ -f "$src" ] && ln -sf "$src" "/usr/local/bin/riscv32-unknown-elf-${t}"; \
+      if [ -f "$src" ]; then \
+        ln -sf "$src" "/usr/local/bin/riscv32-unknown-elf-${t}"; \
+        ln -sf "$src" "${PREFIX}/riscv/bin/riscv64-unknown-elf-${t}"; \
+      fi; \
     done
 
 # ── Environment ───────────────────────────────────────────────────────────────
@@ -173,7 +191,11 @@ ENV PREFIX_CELLIFT=${PREFIX} \
     CELLIFT_DESIGN_PROCESSING_ROOT=/workspace/design-processing \
     CELLIFT_PYTHON_COMMON=/workspace/design-processing/common/python_scripts \
     CELLIFT_YS=/workspace/design-processing/common/yosys \
+    OPENTITAN_ROOT=/workspace/external-dependencies/cellift-opentitan \
     MPLCONFIGDIR=${PREFIX}/matplotlib
+
+# SBT heap/stack — large Chisel designs (Rocket) need ≥4 GB heap
+ENV SBT_OPTS="-Xmx8G -Xss8M"
 
 ENV PATH=${PREFIX}/python-venv/bin:${PREFIX}/bin:${PREFIX}/riscv/bin:/usr/local/bin:${PATH}
 
@@ -186,7 +208,9 @@ RUN yosys --version && \
     spike --version 2>&1 | head -1 && \
     morty --help > /dev/null 2>&1 && \
     riscv64-unknown-elf-gcc --version | head -1 && \
-    python3 -c "import fusesoc; print('fusesoc ok')"
+    python3 -c "import fusesoc; print('fusesoc ok')" && \
+    java -version 2>&1 | head -1 && \
+    which sbt
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

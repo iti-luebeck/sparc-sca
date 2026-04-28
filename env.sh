@@ -50,7 +50,7 @@ export CELLIFT_PYTHON_COMMON=$CELLIFT_DESIGN_PROCESSING_ROOT/common/python_scrip
 # If you would like to customize some of the settings, add another
 # $USER test clause like the one below.
 
-if [ "$USER" = flsolt ] # ETHZ Flavien
+if [ "${USER:-}" = flsolt ] # ETHZ Flavien
 then
     # Example customization
     export CELLIFT_JOBS=250
@@ -78,7 +78,7 @@ export RUSTUP_HOME=$PREFIX_CELLIFT/.rustup
 export CELLIFT_ENV_VERSION=1
 
 # Set opentitan path (for Ibex; included inside the ibex design submodule)
-export OPENTITAN_ROOT=$SPARC_SCA_ROOT/designs/ibex/external-dependencies/cellift-opentitan
+export OPENTITAN_ROOT=$SPARC_SCA_ROOT/external-dependencies/cellift-opentitan
 
 # Set yosys scripts location
 export CELLIFT_YS=$CELLIFT_DESIGN_PROCESSING_ROOT/common/yosys
@@ -88,7 +88,7 @@ export CELLIFT_GCC=riscv32-unknown-elf-gcc
 export CELLIFT_OBJDUMP=riscv32-unknown-elf-objdump
 
 # use libstdc++ in this prefix
-export LD_LIBRARY_PATH=$PREFIX_CELLIFT/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$PREFIX_CELLIFT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 export MPLCONFIGDIR=$PREFIX_CELLIFT/matplotlib
 mkdir -p $MPLCONFIGDIR
