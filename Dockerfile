@@ -217,6 +217,14 @@ ENV PATH=${PREFIX}/python-venv/bin:${PREFIX}/bin:${PREFIX}/riscv/bin:/usr/local/
 
 RUN mkdir -p ${MPLCONFIGDIR} /workspace
 
+# ── Non-root user compatibility ───────────────────────────────────────────────
+# Allow the container to be run with --user $(id -u):$(id -g) so that files
+# written inside the container (sbt target/, build/ outputs, etc.) are owned
+# by the host user rather than root.  /root must be writable so the volume-
+# mounted caches (~/.sbt, ~/.ivy2, ~/.cache, ~/.bash_history) and .bashrc
+# still work when HOME=/root is forced for any UID.
+RUN chmod 777 /root
+
 # ── Shell experience ──────────────────────────────────────────────────────────
 # Colored prompt: sparc-sca:/path$ — cyan label, blue path
 # Persistent history: HISTFILE is set here; the host file is bind-mounted at
