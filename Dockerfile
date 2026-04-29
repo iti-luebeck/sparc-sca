@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libboost-regex-dev libboost-system-dev \
     # bender — libgit2-sys uses system libgit2 when libgit2-dev is present
     libgit2-dev \
+    # RISC-V GNU toolchain build deps
+    texinfo libmpc-dev libmpfr-dev libgmp-dev \
     # Python (for venv + Yosys helpers)
     python3 python3-dev python3-pip python3-venv \
   && rm -rf /var/lib/apt/lists/*
@@ -101,17 +103,31 @@ RUN LIBGIT2_SYS_USE_PKG_CONFIG=1 \
     cargo install bender --version 0.28.2 --root ${PREFIX} && \
     rm -rf ~/.cargo/registry ~/.cargo/git
 
+# ── RISC-V GNU toolchain (newlib, multilib: rv32im/ilp32 + rv64imac/lp64) ─────
+# Cloned directly inside Docker — avoids requiring the multi-GB submodule tree
+# (gcc, binutils, llvm, glibc…) to be checked out on the host.
+# Only the sub-submodules needed for a bare-metal newlib build are fetched.
+RUN git clone --depth 1 https://github.com/riscv/riscv-gnu-toolchain.git /build/riscv-gnu-toolchain && \
+    cd /build/riscv-gnu-toolchain && \
+    git submodule update --init --depth 1 binutils gcc newlib && \
+    ./configure \
+        --prefix=${PREFIX}/riscv \
+        --with-multilib-generator="rv32im-ilp32--;rv64imac-lp64--" && \
+    make -j${JOBS} && \
+    rm -rf /build/riscv-gnu-toolchain
+
 # ── Python virtual environment ───────────────────────────────────────────────
 COPY design-processing/python-requirements.txt /build/dp-req.txt
 COPY python-experiments/power_leakage_analysis/requirements.txt /build/power-req.txt
 
 RUN python3 -m venv ${PREFIX}/python-venv && \
     ${PREFIX}/python-venv/bin/pip install --upgrade pip --quiet && \
-    # Core tooling
+    # Core tooling — use lowRISC forks of fusesoc/edalize required by primgen.py
     ${PREFIX}/python-venv/bin/pip install --quiet \
-        fusesoc==1.12.0 \
-        "edalize<0.5" \
-        ninja==1.10.2 && \
+        "git+https://github.com/lowRISC/fusesoc.git@ot" \
+        "git+https://github.com/lowRISC/edalize.git@ot" \
+        ninja==1.10.2 \
+        mako && \
     # Design-processing helpers
     ${PREFIX}/python-venv/bin/pip install --quiet -r /build/dp-req.txt && \
     # Power-leakage analysis stack
@@ -135,8 +151,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libboost-regex1.74.0 libboost-system1.74.0 \
     # Python (required by venv symlinks + pip-installed scripts)
     python3 python3-dev python3-venv \
-    # RISC-V bare-metal toolchain (covers both RV32 and RV64 targets)
-    gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf \
     # C++ compiler — Verilator generates C++ and calls g++ to compile it
     g++ \
     # Build infrastructure needed when running experiments
@@ -163,15 +177,14 @@ RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E4
 # ── Copy the installed tool prefix from the builder ──────────────────────────
 COPY --from=builder ${PREFIX} ${PREFIX}
 
-# ── RV32 compatibility symlinks + $RISCV/bin symlinks ────────────────────────
-# riscv32-unknown-elf-*: design Makefiles call these names for RV32 targets.
-# $RISCV/bin/riscv64-unknown-elf-*: Chipyard's bootrom Makefile resolves the
-#   compiler as $(RISCV)/bin/riscv64-unknown-elf-gcc.
+# ── RV32 compatibility symlinks ───────────────────────────────────────────────
+# Design Makefiles call riscv32-unknown-elf-* for RV32 targets.
+# The custom toolchain installs as riscv64-unknown-elf-* with rv32im multilib;
+# both names resolve to the same binary.
 RUN for t in gcc cpp ld ar nm as objcopy objdump strip readelf size; do \
-      src="/usr/bin/riscv64-unknown-elf-${t}"; \
+      src="${PREFIX}/riscv/bin/riscv64-unknown-elf-${t}"; \
       if [ -f "$src" ]; then \
-        ln -sf "$src" "/usr/local/bin/riscv32-unknown-elf-${t}"; \
-        ln -sf "$src" "${PREFIX}/riscv/bin/riscv64-unknown-elf-${t}"; \
+        ln -sf "$src" "${PREFIX}/riscv/bin/riscv32-unknown-elf-${t}"; \
       fi; \
     done
 
@@ -183,8 +196,8 @@ ENV PREFIX_CELLIFT=${PREFIX} \
     CELLIFT_PYTHON_VENV=${PREFIX}/python-venv \
     CARGO_HOME=${PREFIX}/.cargo \
     RUSTUP_HOME=${PREFIX}/.rustup \
-    CELLIFT_GCC=riscv64-unknown-elf-gcc \
-    CELLIFT_OBJDUMP=riscv64-unknown-elf-objdump \
+    CELLIFT_GCC=riscv32-unknown-elf-gcc \
+    CELLIFT_OBJDUMP=riscv32-unknown-elf-objdump \
     CELLIFT_JOBS=4 \
     CELLIFT_ENV_SOURCED=yes \
     CELLIFT_ENV_VERSION=1 \
@@ -194,8 +207,11 @@ ENV PREFIX_CELLIFT=${PREFIX} \
     OPENTITAN_ROOT=/workspace/external-dependencies/cellift-opentitan \
     MPLCONFIGDIR=${PREFIX}/matplotlib
 
-# SBT heap/stack — large Chisel designs (Rocket) need ≥4 GB heap
-ENV SBT_OPTS="-Xmx8G -Xss8M"
+# SBT heap/stack — large Chisel designs (Rocket) need ≥4 GB heap.
+# Use JAVA_TOOL_OPTIONS (picked up by all JVM invocations automatically)
+# rather than SBT_OPTS: chipyard's SBT_BIN expands SBT_OPTS *after* -jar,
+# turning JVM flags into sbt commands and breaking the build.
+ENV JAVA_TOOL_OPTIONS="-Xmx8G -Xss8M"
 
 ENV PATH=${PREFIX}/python-venv/bin:${PREFIX}/bin:${PREFIX}/riscv/bin:/usr/local/bin:${PATH}
 
@@ -208,6 +224,7 @@ RUN yosys --version && \
     spike --version 2>&1 | head -1 && \
     morty --help > /dev/null 2>&1 && \
     riscv64-unknown-elf-gcc --version | head -1 && \
+    riscv32-unknown-elf-gcc --version | head -1 && \
     python3 -c "import fusesoc; print('fusesoc ok')" && \
     java -version 2>&1 | head -1 && \
     which sbt

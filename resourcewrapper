@@ -1,0 +1,37 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
+#
+# Thin wrapper used by the design Makefiles to optionally record resource usage.
+# When LOGRESOURCES is not set to "yes" (the normal case) it simply exec's the
+# command, adding no overhead.  Set LOGRESOURCES=yes to enable CSV resource
+# logging via design-processing/resources-record/resourcesrecord.py.
+#
+# Usage: resourcewrapper <table> <row> <col> <cmd> [args...]
+
+if [ "${CELLIFT_ENV_SOURCED:-}" != yes ] || [ -z "${PREFIX_CELLIFT:-}" ]; then
+    echo "resourcewrapper: PREFIX_CELLIFT or CELLIFT_ENV_SOURCED not set." >&2
+    exit 1
+fi
+
+if [ "$#" -lt 4 ]; then
+    echo "resourcewrapper: usage: $0 table row col <cmd> [args...]" >&2
+    exit 1
+fi
+
+tablename="$1"; shift
+rowname="$1";   shift
+colname="$1";   shift
+
+if [ "${LOGRESOURCES:-}" != yes ]; then
+    exec "$@"
+fi
+
+echo "resourcewrapper: logging resources for ${tablename}/${rowname}/${colname}"
+mkdir -p "${CELLIFT_DATADIR:-/tmp}/resources" "${CELLIFT_DATADIR:-/tmp}/resources_output"
+exec "${PREFIX_CELLIFT}/python-venv/bin/python" \
+    "${CELLIFT_DESIGN_PROCESSING_ROOT}/resources-record/resourcesrecord.py" \
+    "$tablename" "$rowname" "$colname" \
+    "${CELLIFT_DATADIR:-/tmp}/resources" \
+    "${CELLIFT_DATADIR:-/tmp}/resources_output" \
+    "$@"

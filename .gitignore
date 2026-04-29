@@ -20,3 +20,5 @@ results_*/
 *.png
 # Tool build logs
 *.log
+# Paper (not part of the public release)
+paper/

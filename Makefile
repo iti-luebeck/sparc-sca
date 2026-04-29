@@ -99,8 +99,9 @@ checkout-tools:
 	git submodule update --init --recursive tools/sv2v
 	git submodule update --init --recursive tools/morty
 	git submodule update --init --recursive tools/bender
-	git submodule update --init --recursive tools/riscv-gnu-toolchain
 	git submodule update --init --recursive tools/riscv-isa-sim
+	git submodule update --init tools/riscv-gnu-toolchain
+	git -C tools/riscv-gnu-toolchain submodule update --init --depth 1 binutils gcc newlib
 
 # ── Simulator builds ──────────────────────────────────────────────────────────
 # Each design's Makefile resolves the full dependency chain:

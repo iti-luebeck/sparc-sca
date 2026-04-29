@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
 
-# run_full_audit.sh — Full CellIFT leakage audit: inventory, cleanup, simulator
+# run_full_audit.sh — Full SPARC leakage audit: inventory, cleanup, simulator
 # rebuild, and evaluation re-run for Ibex, Proteus, and Rocket.
 #
 # Phases:
@@ -272,17 +272,17 @@ validate_ibex_results() {
     echo "  Key Welch metrics (Ibex):"
     if [[ -f "${base}/results_aes/unmasked/welch_summary.txt" ]]; then
         echo "    AES unmasked:"
-        rg -n "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t" \
+        grep -En "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t" \
             "${base}/results_aes/unmasked/welch_summary.txt" | sed 's/^/      /'
     fi
     if [[ -f "${base}/results_aes/masked/welch_summary.txt" ]]; then
         echo "    AES masked:"
-        rg -n "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t" \
+        grep -En "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t" \
             "${base}/results_aes/masked/welch_summary.txt" | sed 's/^/      /'
     fi
     if [[ -f "${base}/results_kyber/unmasked/welch_summary.txt" ]]; then
         echo "    Kyber unmasked:"
-        rg -n "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t|nan" \
+        grep -En "\[hamming_weight_counter_t0\]|\[hamming_distance_counter_t0\]|first_leaky_cycle|max_t|nan" \
             "${base}/results_kyber/unmasked/welch_summary.txt" | sed 's/^/      /'
     fi
 
@@ -432,6 +432,7 @@ if [[ "$SKIP_AUDIT" -eq 0 ]]; then
     ROCKET_BINS=(
         "build/run_cellift_csvlog_0.1/default-verilator/Vtop_tiny_soc"
         "build/run_cellift_fasttrace_0.1/default-verilator/Vtop_tiny_soc"
+        "build/run_cellift_fasttrace_fst_0.1/default-verilator/Vtop_tiny_soc"
         "build/run_vanilla_trace_0.1/default-verilator/Vtop_tiny_soc"
         "build/run_vanilla_trace_fst_0.1/default-verilator/Vtop_tiny_soc"
     )
@@ -459,12 +460,14 @@ if [[ "$SKIP_CLEAN" -eq 0 ]]; then
         local dir="$2"
         echo "  ${label}:"
 
-        # Verilator compiled binaries
-        if [[ -d "${dir}/build" ]]; then
+        # Verilator compiled binaries (kept when --skip-build is set)
+        if [[ "$SKIP_BUILD" -eq 0 ]] && [[ -d "${dir}/build" ]]; then
             local sz
             sz=$(du -sh "${dir}/build" 2>/dev/null | cut -f1 || echo "?")
             echo "    rm -rf build/  (${sz})"
             rm -rf "${dir}/build"
+        elif [[ "$SKIP_BUILD" -eq 1 ]] && [[ -d "${dir}/build" ]]; then
+            echo "    keep build/  (--skip-build)"
         fi
 
         # Result directories
