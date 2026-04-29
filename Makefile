@@ -142,11 +142,13 @@ docker-build:
 	  .
 
 docker-run:
+	@touch ~/.bash_history
 	docker run -it --rm \
 	  -v $$(pwd):/workspace \
 	  -v sparc-sca-sbt-cache:/root/.sbt \
 	  -v sparc-sca-ivy2-cache:/root/.ivy2 \
 	  -v sparc-sca-coursier-cache:/root/.cache/coursier \
+	  -v ~/.bash_history:/root/.bash_history \
 	  -e CELLIFT_JOBS=$$(nproc) \
 	  $(DOCKER_IMAGE):$(DOCKER_TAG)
 

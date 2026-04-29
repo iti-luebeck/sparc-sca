@@ -217,6 +217,18 @@ ENV PATH=${PREFIX}/python-venv/bin:${PREFIX}/bin:${PREFIX}/riscv/bin:/usr/local/
 
 RUN mkdir -p ${MPLCONFIGDIR} /workspace
 
+# ── Shell experience ──────────────────────────────────────────────────────────
+# Colored prompt: sparc-sca:/path$ — cyan label, blue path
+# Persistent history: HISTFILE is set here; the host file is bind-mounted at
+# runtime (see Makefile docker-run), so history survives container restarts.
+RUN { \
+      echo 'export PS1="\[\033[1;36m\]sparc-sca\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ "'; \
+      echo 'export HISTFILE=/root/.bash_history'; \
+      echo 'export HISTSIZE=10000 HISTFILESIZE=10000'; \
+      echo 'shopt -s histappend'; \
+      echo 'PROMPT_COMMAND="history -a"'; \
+    } >> /root/.bashrc
+
 # ── Smoke test ────────────────────────────────────────────────────────────────
 RUN yosys --version && \
     verilator --version && \
