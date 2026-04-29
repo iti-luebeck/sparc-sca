@@ -147,8 +147,8 @@ docker-build:
 docker-run:
 	@touch ~/.bash_history
 	docker run -it --rm \
-	  --user $$(id -u):$$(id -g) \
-	  -e HOME=/root \
+	  -e HOST_UID=$$(id -u) \
+	  -e HOST_GID=$$(id -g) \
 	  -v $$(pwd):/workspace \
 	  -v sparc-sca-sbt-cache:/root/.sbt \
 	  -v sparc-sca-ivy2-cache:/root/.ivy2 \

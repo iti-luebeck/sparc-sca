@@ -155,6 +155,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     # Build infrastructure needed when running experiments
     make ninja-build git curl wget perl \
+    # gosu — used by docker-entrypoint.sh to exec as host UID:GID
+    gosu \
     # Misc utilities
     ca-certificates unzip gnupg \
   && rm -rf /var/lib/apt/lists/*
@@ -250,4 +252,5 @@ RUN yosys --version && \
     which sbt
 
 WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/bin/bash"]
