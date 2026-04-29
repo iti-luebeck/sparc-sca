@@ -83,8 +83,11 @@ checkout-designs:
 	git -C designs/chipyard submodule update --init generators/hwacha
 	git -C designs/chipyard submodule update --init generators/icenet
 	git -C designs/chipyard submodule update --init generators/sifive-cache
-	git -C designs/chipyard submodule update --init generators/sha3
-	git -C designs/chipyard submodule update --init generators/gemmini
+	# gemmini and sha3 are intentionally NOT initialised: their Scala sources
+	# import midas.targetutils (FireSim/MIDAS), which is not available without
+	# the full FireSim submodule tree.  MySmallVMRocketConfig does not use
+	# either accelerator; leaving the directories empty lets SBT compile them
+	# as zero-source projects without errors.
 	git -C designs/chipyard submodule update --init generators/fft-generator
 	git -C designs/chipyard submodule update --init generators/riscv-sodor
 	git -C designs/chipyard submodule update --init generators/ibex
