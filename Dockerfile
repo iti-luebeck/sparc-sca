@@ -103,7 +103,7 @@ RUN LIBGIT2_SYS_USE_PKG_CONFIG=1 \
     cargo install bender --version 0.28.2 --root ${PREFIX} && \
     rm -rf ~/.cargo/registry ~/.cargo/git
 
-# ── RISC-V GNU toolchain (newlib, multilib: rv32im/ilp32 + rv64imac/lp64) ─────
+# ── RISC-V GNU toolchain (newlib, full multilib matrix) ──────────────────────
 # Cloned directly inside Docker — avoids requiring the multi-GB submodule tree
 # (gcc, binutils, llvm, glibc…) to be checked out on the host.
 # Only the sub-submodules needed for a bare-metal newlib build are fetched.
@@ -112,7 +112,7 @@ RUN git clone --depth 1 https://github.com/riscv/riscv-gnu-toolchain.git /build/
     git submodule update --init --depth 1 binutils gcc newlib && \
     ./configure \
         --prefix=${PREFIX}/riscv \
-        --with-multilib-generator="rv32im-ilp32--;rv64imac-lp64--" && \
+        --enable-multilib && \
     make -j${JOBS} && \
     rm -rf /build/riscv-gnu-toolchain
 
@@ -179,7 +179,7 @@ COPY --from=builder ${PREFIX} ${PREFIX}
 
 # ── RV32 compatibility symlinks ───────────────────────────────────────────────
 # Design Makefiles call riscv32-unknown-elf-* for RV32 targets.
-# The custom toolchain installs as riscv64-unknown-elf-* with rv32im multilib;
+# The custom toolchain installs as riscv64-unknown-elf-* with full multilib;
 # both names resolve to the same binary.
 RUN for t in gcc cpp ld ar nm as objcopy objdump strip readelf size; do \
       src="${PREFIX}/riscv/bin/riscv64-unknown-elf-${t}"; \
