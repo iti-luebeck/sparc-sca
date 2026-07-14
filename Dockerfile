@@ -140,6 +140,12 @@ RUN python3 -m venv ${PREFIX}/python-venv && \
 # ══════════════════════════════════════════════════════════════════════════════
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
 
+# OCI image metadata — links the GHCR package to the source repo and populates
+# the package description. (Labels on the runtime stage end up in the shipped image.)
+LABEL org.opencontainers.image.source="https://github.com/iti-luebeck/sparc-sca"
+LABEL org.opencontainers.image.description="SPARC-SCA prebuilt environment: CellIFT Yosys, Verilator, Spike, sv2v and the RISC-V toolchain, ready to run the power side-channel leakage evaluation."
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PREFIX=/opt/sparc-sca
 

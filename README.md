@@ -52,6 +52,24 @@ designs/<cpu>/cellift/
 
 ### Option A — Docker (recommended)
 
+**Fastest — pull the prebuilt image** (all tools + RISC-V toolchain already compiled):
+
+```bash
+# Get the repository (design sources are mounted into the container)
+git clone --recurse-submodules https://github.com/iti-luebeck/sparc-sca.git
+cd sparc-sca
+
+# Pull and start an interactive session with the repository mounted (~13 GB image)
+docker pull ghcr.io/iti-luebeck/sparc-sca:latest
+docker run -it --rm -v "$(pwd):/workspace" ghcr.io/iti-luebeck/sparc-sca:latest
+# Inside the container:
+source env.sh
+make generate-rtl          # Generate Proteus + Rocket Verilog (~10 min, once)
+make build-sims            # Compile Verilator simulators for all three designs
+```
+
+**Or build the image yourself** (~2 hr — all tools compiled from source):
+
 ```bash
 # Initialise design and tool submodules (except riscv-gnu-toolchain, cloned inside Docker)
 make checkout-tools
