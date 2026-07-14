@@ -18,13 +18,16 @@
 	url = https://github.com/riscv-software-src/riscv-isa-sim.git
 [submodule "tools/sparc-sca-yosys"]
 	path = tools/sparc-sca-yosys
-	url = https://github.com/aneskovic/sparc-sca-yosys.git
+	url = https://github.com/iti-luebeck/sparc-sca-yosys.git
+	branch = sparc-sca-leakage
 [submodule "tools/verilator"]
 	path = tools/verilator
-	url = https://github.com/aneskovic/sparc-sca-verilator.git
+	url = https://github.com/iti-luebeck/sparc-sca-verilator.git
+	branch = sparc-sca-fix
 [submodule "designs/ibex"]
 	path = designs/ibex
-	url = https://github.com/aneskovic/sparc-sca-ibex.git
+	url = https://github.com/iti-luebeck/sparc-sca-ibex.git
+	branch = sparc-sca
 [submodule "external-dependencies/cellift-opentitan"]
 	path = external-dependencies/cellift-opentitan
 	url = https://github.com/comsec-group/cellift-opentitan.git
@@ -32,7 +35,9 @@
 	shallow = true
 [submodule "designs/proteus"]
 	path = designs/proteus
-	url = https://github.com/aneskovic/sparc-sca-proteus.git
+	url = https://github.com/iti-luebeck/sparc-sca-proteus.git
+	branch = sparc-sca
 [submodule "designs/chipyard"]
 	path = designs/chipyard
-	url = https://github.com/aneskovic/sparc-sca-chipyard.git
+	url = https://github.com/iti-luebeck/sparc-sca-chipyard.git
+	branch = sparc-sca
