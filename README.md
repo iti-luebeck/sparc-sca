@@ -1,8 +1,31 @@
 # SPARC-SCA: Power Side-Channel Leakage Analysis via Cell-Level Information Flow Tracking
 
-SPARC-SCA is a hardware security analysis framework that detects **key-dependent power side-channel leakage** in RTL processor designs. It extends [CellIFT](https://comsec.ethz.ch/research/microarch/cellift/) with a third signal layer that tracks not only which signals are influenced by a secret key (taint), but which of those signals also switch state—the physical root cause of exploitable power leakage in CMOS.
+SPARC-SCA is a framework that detects key-dependent power side-channel leakage in RTL processors by combining taint tracking with signal-switching analysis.
 
 Evaluated on three RISC-V processors (Ibex, Proteus, Rocket) running AES-128 and CRYSTALS-Kyber-512. All configurations exceed the NIST TVLA leakage threshold.
+
+## Paper
+
+SPARC-SCA is the artifact accompanying our paper, accepted at **ICCAD 2026**:
+
+> Andrija Nešković, Christian Ewert, Mladen Berekovic, and Saleh Mulhem.
+> **SPARC: Automated Root-Cause Analysis of Pre-Silicon Power Side-Channel Leakage in the Processor Design Flow.**
+> In *IEEE/ACM International Conference on Computer-Aided Design (ICCAD '26)*, November 8–12, 2026, San Jose, CA, USA.
+
+The official proceeding is not yet live; a pre-print link will be provided here shortly. However, we were given a DOI and metadata:
+
+```bibtex
+@inproceedings{neskovic2026sparc,
+  author    = {Ne\v{s}kovi\'{c}, Andrija and Ewert, Christian and Berekovic, Mladen and Mulhem, Saleh},
+  title     = {SPARC: Automated Root-Cause Analysis of Pre-Silicon Power Side-Channel Leakage in the Processor Design Flow},
+  booktitle = {IEEE/ACM International Conference on Computer-Aided Design (ICCAD '26)},
+  year      = {2026},
+  address   = {San Jose, CA, USA},
+  publisher = {Association for Computing Machinery},
+  isbn      = {979-8-4007-2873-0},
+  doi       = {10.1145/3831252.3834007},
+}
+```
 
 ## Repository Structure
 
@@ -55,15 +78,22 @@ designs/<cpu>/cellift/
 **Fastest — pull the prebuilt image** (all tools + RISC-V toolchain already compiled):
 
 ```bash
-# Get the repository (design sources are mounted into the container)
-git clone --recurse-submodules https://github.com/iti-luebeck/sparc-sca.git
+# Get the repository (no --recurse-submodules — the prebuilt image already
+# ships every tool, so only the design sources need to be checked out below)
+git clone https://github.com/iti-luebeck/sparc-sca.git
 cd sparc-sca
 
-# Pull and start an interactive session with the repository mounted (~13 GB image)
-docker pull ghcr.io/iti-luebeck/sparc-sca:latest
-docker run -it --rm -v "$(pwd):/workspace" ghcr.io/iti-luebeck/sparc-sca:latest
+# Initialise design submodules only (ibex, proteus, chipyard, cellift-opentitan).
+# Tool submodules (yosys, verilator, riscv-gnu-toolchain, ...) aren't needed —
+# they're already compiled into the prebuilt image.
+make checkout-designs
+
+# Pull the prebuilt image (~13 GB) and start an interactive session with the
+# repository mounted. The image already has env vars baked in — no need to
+# source env.sh inside the container.
+make docker-pull
+make docker-run
 # Inside the container:
-source env.sh
 make generate-rtl          # Generate Proteus + Rocket Verilog (~10 min, once)
 make build-sims            # Compile Verilator simulators for all three designs
 ```
@@ -81,8 +111,7 @@ make docker-build
 
 # Start an interactive session with the repository mounted
 make docker-run
-# Inside the container:
-source env.sh
+# Inside the container (env vars are already baked into the image):
 make generate-rtl          # Generate Proteus + Rocket Verilog (~10 min, once)
 make build-sims            # Compile Verilator simulators for all three designs
 ```
@@ -525,5 +554,11 @@ is licensed under the **ISC License**, derived from the CellIFT Yosys pass
 
 The simulation wrapper (`simulation/wrappers/ibex_tiny_soc_with_leakage.sv`)
 is licensed under **Apache-2.0** (Copyright lowRISC contributors).
+
+The following original tooling — with no CellIFT lineage — is licensed
+under **MIT** instead (see `LICENSE-MIT`):
+`Makefile`, `Dockerfile`, `env.sh`, `run_full_audit.sh`, `resourcewrapper`,
+and `analysis/tvla_analysis.py`, `compute_ttest.py`, `extract_vcd_leakage.py`,
+`extract_leakage_traces.py`, `detect_computation_end.py`.
 
 Tool and design submodules carry their own licenses (see each subdirectory).

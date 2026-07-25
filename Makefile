@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2026 Andrija Neskovic, University of Luebeck
 
 SHELL := /bin/bash
@@ -6,7 +6,7 @@ SHELL := /bin/bash
 # checkout-designs and checkout-tools work without env.sh (host-side git ops).
 # Docker targets never need env.sh.
 # generate-rtl calls sbt/Java directly — no CellIFT env required.
-EXEMPT_TARGETS := docker-build docker-run docker-run-ro checkout-designs checkout-tools generate-rtl
+EXEMPT_TARGETS := docker-pull docker-build docker-run docker-run-ro checkout-designs checkout-tools generate-rtl
 ifeq (,$(filter $(EXEMPT_TARGETS),$(MAKECMDGOALS)))
 ifndef CELLIFT_ENV_SOURCED
 $(error Please source env.sh first — see README.md)
@@ -18,6 +18,7 @@ endif
 
 DOCKER_IMAGE ?= sparc-sca
 DOCKER_TAG   ?= latest
+GHCR_IMAGE   ?= ghcr.io/iti-luebeck/sparc-sca
 
 # ── Default target ────────────────────────────────────────────────────────────
 .PHONY: help
@@ -48,7 +49,8 @@ help:
 	@echo "    make clean-designs      clean build/ results/ traces/ in each design"
 	@echo ""
 	@echo "  Docker:"
-	@echo "    make docker-build       build the sparc-sca Docker image"
+	@echo "    make docker-pull        pull the prebuilt image from GHCR and tag it locally"
+	@echo "    make docker-build       build the sparc-sca Docker image from source"
 	@echo "    make docker-run         start interactive shell with repo mounted (rw)"
 	@echo "    make docker-run-ro      start interactive shell with repo mounted (ro)"
 
@@ -137,7 +139,11 @@ cleantools:
 	$(MAKE) -C tools cleantools
 
 # ── Docker ────────────────────────────────────────────────────────────────────
-.PHONY: docker-build docker-run docker-run-ro
+.PHONY: docker-pull docker-build docker-run docker-run-ro
+docker-pull:
+	docker pull $(GHCR_IMAGE):$(DOCKER_TAG)
+	docker tag $(GHCR_IMAGE):$(DOCKER_TAG) $(DOCKER_IMAGE):$(DOCKER_TAG)
+
 docker-build:
 	docker build \
 	  --build-arg JOBS=$$(nproc) \

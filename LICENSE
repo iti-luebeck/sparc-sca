@@ -5,6 +5,11 @@ SPARC-SCA incorporates components from the CellIFT project:
   Copyright (C) 2022 ETH Zurich (GPL-3.0-only)
   Copyright (C) 2020 Alberto Gonzalez & Flavien Solt (ISC)
 
+This GPL-3.0-only license applies to SPARC-SCA's original code and to
+files derived from the CellIFT project. Some original files with no
+CellIFT lineage are instead licensed under MIT — see LICENSE-MIT and the
+"License" section of README.md for the full per-file breakdown.
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

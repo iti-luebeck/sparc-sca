@@ -22,3 +22,6 @@ results_*/
 *.log
 # Paper (not part of the public release)
 paper/
+.vscode/
+DS_Store
+.DS_Store
