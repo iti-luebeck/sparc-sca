@@ -12,7 +12,7 @@ SPARC-SCA is the artifact accompanying our paper, accepted at **ICCAD 2026**:
 > **SPARC: Automated Root-Cause Analysis of Pre-Silicon Power Side-Channel Leakage in the Processor Design Flow.**
 > In *IEEE/ACM International Conference on Computer-Aided Design (ICCAD '26)*, November 8–12, 2026, San Jose, CA, USA.
 
-The official proceeding is not yet live; a pre-print link will be provided here shortly. However, we were given a DOI and metadata:
+The official proceeding is not yet live; a pre-print is avalable on [arXiv](https://arxiv.org/abs/2607.23218). If you want to cite SPARC in your work, use:
 
 ```bibtex
 @inproceedings{neskovic2026sparc,
