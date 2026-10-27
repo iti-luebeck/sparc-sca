@@ -232,9 +232,18 @@ docker-pull:
 # Publish to GHCR. Needs `docker login ghcr.io` with a token carrying
 # write:packages -- see README.md. Pushes the dated tag first so the previous
 # image stays reachable if the new one has to be rolled back.
+# PUSH_TAG is the tag to publish; DOCKER_TAG is the LOCAL tag to publish it
+# from, which docker-build always writes as `latest`. They are separate because
+# publishing a dated tag means pushing the current build under a new name:
+#   make docker-push PUSH_TAG=$(shell date +%%Y-%%m-%%d)   # dated tag
+#   make docker-push                                      # then move latest
+# Overriding DOCKER_TAG alone would look for a local image that does not exist.
+PUSH_TAG ?= $(DOCKER_TAG)
 docker-push:
-	docker tag $(DOCKER_IMAGE):$(DOCKER_TAG) $(GHCR_IMAGE):$(DOCKER_TAG)
-	docker push $(GHCR_IMAGE):$(DOCKER_TAG)
+	@docker image inspect $(DOCKER_IMAGE):$(DOCKER_TAG) >/dev/null 2>&1 \
+	  || { echo "no local image $(DOCKER_IMAGE):$(DOCKER_TAG) -- run 'make docker-build' first"; exit 1; }
+	docker tag $(DOCKER_IMAGE):$(DOCKER_TAG) $(GHCR_IMAGE):$(PUSH_TAG)
+	docker push $(GHCR_IMAGE):$(PUSH_TAG)
 
 docker-build:
 	docker build \

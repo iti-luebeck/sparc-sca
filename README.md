@@ -104,9 +104,9 @@ push.
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
-make docker-build
-make docker-push                       # DOCKER_TAG=latest by default
-make docker-push DOCKER_TAG=2026-10-27 # or publish a dated tag
+make docker-build                       # writes the local sparc-sca:latest
+make docker-push PUSH_TAG=$(date +%F)   # publish a dated tag first
+make docker-push                        # then move :latest to the same build
 ```
 
 
