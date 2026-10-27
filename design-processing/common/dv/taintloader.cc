@@ -78,24 +78,40 @@ extern "C" void read_taints(const char* filename) {
   std::ifstream f;
   f.open(filename);
 
-  uint64_t taint_id;
-  std::string region_offset_str;
-  uint64_t num_bytes;
-  std::string byte_taint_contents;
-
-  uint64_t region_offset;
+  // Skip comments, and check every extraction.
+  //
+  // This loop used to declare taint_id / region_offset / num_bytes OUTSIDE it
+  // and ignore whether the stream extractions succeeded. A '#' comment line
+  // fails all of them, so the section pushed below kept whatever happened to
+  // be on the stack -- including its LENGTH. ift_rom_mem.sv then runs
+  // (section_len + WidthBytes-1)/WidthBytes iterations, each writing the
+  // mem_taints associative array: measured at 110M+ iterations and 45 GiB RSS
+  // on a scenario whose taint file carries the generator's own header
+  // comments. Whether it manifested at all depended on stack layout, which is
+  // why it sat unnoticed -- a scenario with a bare one-line taint file ran
+  // fine while a commented one took down the machine. Both the comment skip
+  // and the per-field validation are needed: the format is written by hand and
+  // by gen_scenarios.py, and a malformed line must be reported, not guessed.
   std::string tmp_line;
   while (std::getline(f, tmp_line)) {
-    if (!tmp_line.size())
+    size_t first = tmp_line.find_first_not_of(" \t\r");
+    if (first == std::string::npos || tmp_line[first] == '#')
         continue;
+
+    uint64_t taint_id = 0, num_bytes = 0, region_offset = 0;
+    std::string region_offset_str, byte_taint_contents;
+
     std::istringstream isstream(tmp_line);
-    isstream >> taint_id;
-    isstream >> region_offset_str;
-    isstream >> num_bytes;
-    isstream >> byte_taint_contents;
+    if (!(isstream >> taint_id >> region_offset_str >> num_bytes >> byte_taint_contents)) {
+      std::cerr << "taintloader: ignoring malformed taint line: " << tmp_line << std::endl;
+      continue;
+    }
 
     std::istringstream str_to_hex_stream(region_offset_str);
-    str_to_hex_stream >> std::hex >> region_offset;
+    if (!(str_to_hex_stream >> std::hex >> region_offset)) {
+      std::cerr << "taintloader: ignoring bad taint address: " << tmp_line << std::endl;
+      continue;
+    }
 
     taint_sections[taint_id].push_back(std::make_pair(region_offset, num_bytes));
     taint_assignments[taint_id][region_offset] = byte_taint_contents;

@@ -74,7 +74,7 @@ RUN cd /build/yosys && \
     make PREFIX=${PREFIX} install && \
     rm -rf /build/yosys
 
-# ── Verilator (with FST integer-overflow fix) ─────────────────────────────────
+# ── Verilator (FST scratch files honour $TMPDIR) ─────────────────────────────────
 COPY tools/verilator/ /build/verilator/
 RUN cd /build/verilator && \
     autoconf && \
@@ -153,6 +153,15 @@ ARG PREFIX=/opt/sparc-sca
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Yosys runtime deps
     libreadline8 libffi8 zlib1g tcl8.6 libtinfo6 \
+    # Yosys BUILD deps, so `make install_yosys` works inside this image.
+    # The cellift instrumentation pass (tools/sparc-sca-yosys/passes/cellift/)
+    # is the one tool source this project edits, and it is compiled into the
+    # yosys binary rather than loaded as a plugin -- so changing it means
+    # rebuilding yosys, and without these the rebuild fails on a missing
+    # tcl.h / readline.h / bison. tcl-dev is not optional: the instrumentation
+    # entry point is `yosys -c instrument.ys.tcl`.
+    bison flex pkg-config \
+    libffi-dev libreadline-dev tcl-dev zlib1g-dev \
     # Spike runtime deps
     libboost-regex1.74.0 libboost-system1.74.0 \
     # Python (required by venv symlinks + pip-installed scripts)
@@ -169,19 +178,48 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Required for:
 #   - Proteus: SpinalHDL elaboration  (sbt "runMain riscv.CoreDynamicExtMem")
 #   - Rocket:  Chisel/FIRRTL elaboration (make verilog CONFIG=MySmallVMRocketConfig)
-RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
-      | gpg --no-default-keyring --keyring gnupg-ring:/etc/apt/trusted.gpg.d/sbt.gpg --import \
-  && chmod 644 /etc/apt/trusted.gpg.d/sbt.gpg \
-  && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" > /etc/apt/sources.list.d/sbt.list \
-  && apt-get update && apt-get install -y --no-install-recommends \
-      default-jdk \
-      sbt \
+# Every design declares its own sbt version in project/build.properties and the
+# launcher bootstraps it: chipyard pins 1.5.5, proteus pins ${SBT_VERSION}.
+# Nothing inherits a version implicitly, so adding a design means adding its pin.
+#
+# The launcher is pinned here rather than installed from the scala-sbt Debian
+# repo, which now serves only 2.0.x. That package cannot satisfy this repo: the
+# 2.0.x launcher refuses to start below JDK 17, while chipyard's declared sbt
+# 1.5.5 predates JDK 17 support -- so satisfying the launcher breaks the project
+# it launches. Pinning makes the image reproducible regardless of what apt
+# serves on the day it is built.
+#
+# Both JDKs are installed. JAVA_HOME defaults to 11, the stricter of the two
+# constraints (sbt 1.5.5), and a build needing a newer JVM selects it per
+# invocation with JAVA_HOME=${JAVA_HOME_17}.
+ARG SBT_VERSION=1.10.7
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      openjdk-11-jdk \
+      openjdk-17-jdk \
       # dtc: needed to compile the Chipyard bootrom during FIRRTL elaboration
       device-tree-compiler \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -fsSL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
+       -o /tmp/sbt.tgz \
+  && tar -xzf /tmp/sbt.tgz -C /opt \
+  && rm /tmp/sbt.tgz \
+  && ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt
+
+ENV JAVA_HOME_11=/usr/lib/jvm/java-11-openjdk-amd64
+ENV JAVA_HOME_17=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=/usr/lib/jvm/java-11-openjdk-amd64/bin:${PATH}
 
 # ── Copy the installed tool prefix from the builder ──────────────────────────
 COPY --from=builder ${PREFIX} ${PREFIX}
+# Readable and traversable for any uid, so the image also works when run with
+# --user $(id -u):$(id -g) instead of as root.
+RUN chmod -R a+rX ${PREFIX}
+# MPLCONFIGDIR points inside ${PREFIX}, which the line above makes readable but
+# not writable. Matplotlib wants to write a font cache there on first import, so
+# a non-root user gets "not a writable directory" and a fresh temporary cache per
+# process -- noisy, and slower on every plot. World-writable fixes it for any uid.
+RUN mkdir -p ${PREFIX}/matplotlib && chmod 1777 ${PREFIX}/matplotlib
 
 # ── RV32 compatibility symlinks ───────────────────────────────────────────────
 # Design Makefiles call riscv32-unknown-elf-* for RV32 targets.
@@ -238,14 +276,32 @@ RUN { \
 # ── Smoke test ────────────────────────────────────────────────────────────────
 RUN yosys --version && \
     verilator --version && \
+    # The CellIFT pass must be present in the PATH yosys, and the options the
+    # instrumentation script passes must exist in it. The pass is compiled in,
+    # not loaded as a plugin, so a stale binary accepts instrument.ys.tcl and
+    # silently emits a valid cellift.sv with the feature missing. Nothing warns
+    # you at run time, so fail the build here instead.
+    yosys -p 'help cellift' 2>/dev/null | grep -q -- '-track-power-leakage' && \
+    yosys -p 'help cellift' 2>/dev/null | grep -q -- '-hd-taint-prev' && \
+    yosys -p 'help cellift' 2>/dev/null | grep -q -- '-power-leakage-include-signals' && \
     sv2v --version && \
     spike --version 2>&1 | head -1 && \
     morty --help > /dev/null 2>&1 && \
     riscv64-unknown-elf-gcc --version | head -1 && \
     riscv32-unknown-elf-gcc --version | head -1 && \
     python3 -c "import fusesoc; print('fusesoc ok')" && \
-    java -version 2>&1 | head -1 && \
-    which sbt
+    java -version 2>&1 | grep -v 'Picked up' | head -1 && \
+    # sbt must actually START, not merely be on PATH: an sbt whose JDK is too
+    # old installs cleanly and then fails on every invocation.
+    sbt --version 2>&1 | tail -1 && \
+    # Both JDKs must be present: designs select between them per build.
+    ${JAVA_HOME_11}/bin/java -version 2>&1 | grep -v 'Picked up' | head -1 && \
+    ${JAVA_HOME_17}/bin/java -version 2>&1 | grep -v 'Picked up' | head -1 && \
+    which sbt && \
+    # sbt just ran as root and left a root-owned /tmp/.sbt server directory in
+    # this layer. A non-root run cannot create its socket inside it and fails
+    # with AccessDeniedException before the build starts, so drop it here.
+    rm -rf /tmp/.sbt
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

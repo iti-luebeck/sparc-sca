@@ -73,10 +73,14 @@ install_verilator: | $(LOGFILES)
 
 # ── Yosys with CellIFT + power-leakage extension ─────────────────────────────
 .PHONY: install_yosys
+# YOSYS_ENABLE_ABC=0 skips building ABC, which the instrumentation flow never
+# calls (no `abc` anywhere in design-processing/common/yosys/). Useful for a
+# pass-development rebuild; leave it at the default for a real install.
+YOSYS_ENABLE_ABC ?= 1
 install_yosys: | $(LOGFILES)
-	( cd sparc-sca-yosys && make config-gcc && \
-	  make PREFIX=$(PREFIX_CELLIFT) -j$(CELLIFT_JOBS) && \
-	  make PREFIX=$(PREFIX_CELLIFT) install ) \
+	( cd sparc-sca-yosys && make config-gcc ENABLE_ABC=$(YOSYS_ENABLE_ABC) && \
+	  make ENABLE_ABC=$(YOSYS_ENABLE_ABC) PREFIX=$(PREFIX_CELLIFT) -j$(CELLIFT_JOBS) && \
+	  make ENABLE_ABC=$(YOSYS_ENABLE_ABC) PREFIX=$(PREFIX_CELLIFT) install ) \
 	  >$(LOGFILES)/yosys.log 2>&1
 
 # ── sv2v — SystemVerilog-to-Verilog converter (pre-built binary) ──────────────

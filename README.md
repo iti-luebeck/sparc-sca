@@ -33,7 +33,7 @@ The official proceeding is not yet live; a pre-print is avalable on [arXiv](http
 sparc-sca/
 ├── tools/
 │   ├── sparc-sca-yosys/       Yosys fork with CellIFT + leakage shadow extension
-│   ├── verilator/             Verilator with FST integer-overflow fix
+│   ├── verilator/             Verilator, patched so FST scratch files honour $TMPDIR
 │   ├── sv2v/                  SystemVerilog-to-Verilog converter
 │   ├── riscv-gnu-toolchain/   RISC-V bare-metal cross-compiler (RV32/RV64) [local builds only]
 │   ├── riscv-isa-sim/         Spike ISA reference simulator
@@ -88,7 +88,7 @@ cd sparc-sca
 # they're already compiled into the prebuilt image.
 make checkout-designs
 
-# Pull the prebuilt image (~13 GB) and start an interactive session with the
+# Pull the prebuilt image (~14 GB) and start an interactive session with the
 # repository mounted. The image already has env vars baked in — no need to
 # source env.sh inside the container.
 make docker-pull
@@ -97,6 +97,18 @@ make docker-run
 make generate-rtl          # Generate Proteus + Rocket Verilog (~10 min, once)
 make build-sims            # Compile Verilator simulators for all three designs
 ```
+
+Pulling needs no credentials — the GHCR package is public. **Publishing** a new
+image does: create a GitHub token with the `write:packages` scope, log in, and
+push.
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+make docker-build
+make docker-push                       # DOCKER_TAG=latest by default
+make docker-push DOCKER_TAG=2026-10-27 # or publish a dated tag
+```
+
 
 **Or build the image yourself** (~2 hr — all tools compiled from source):
 
@@ -127,7 +139,31 @@ make generate-rtl      # Generates Proteus + Rocket Verilog (~10 min, once)
 make build-sims        # Compiles Verilator simulators for all three designs
 ```
 
-Customise `PREFIX_CELLIFT`, `CELLIFT_JOBS`, and `RISCV` in `env.sh` before running. The file includes a per-user override section at the bottom.
+Customise `PREFIX_CELLIFT` and `CELLIFT_JOBS` in `env.sh` before running; it has an
+example customisation section at the bottom. `env.sh` honours a `PREFIX_CELLIFT`
+that is already exported, so it can be sourced inside a container as well.
+
+**Finding the RISC-V toolchain.** If it is not on `PATH`, either export `RISCV` so
+that `$RISCV/bin/riscv64-unknown-elf-gcc` exists, or set `SPARC_SCA_RISCV_BIN` to
+the directory holding the binaries. With neither set, the scenario Makefiles
+resolve `riscv64-unknown-elf-*` from `PATH`.
+
+**`make generate-rtl` also needs a JVM and sbt**, because Proteus elaborates
+through SpinalHDL and Rocket through Chisel/FIRRTL. Each design pins its own sbt
+version in `project/build.properties` (chipyard 1.5.5, proteus 1.10.7), so any
+sbt 1.x launcher bootstraps the right one. Note that the sbt Debian repository now
+ships 2.x, whose launcher refuses to start below JDK 17 while chipyard's pinned
+1.5.5 predates JDK 17 support -- install an sbt 1.x launcher rather than the
+distribution package.
+
+To rebuild only Yosys after editing the instrumentation pass -- it is compiled
+into the binary rather than loaded as a plugin, so an edit has no effect until
+then -- use `make install_yosys` instead of the full `make installtools`.
+
+> The native route is offered as an option and is **best-effort**: it compiles
+> Yosys, Verilator, Spike and the RISC-V toolchain from source, and the system
+> packages required vary across Linux distributions and releases. Docker
+> (Option A) is the supported path.
 
 ### End-to-end smoke test
 
@@ -137,6 +173,23 @@ cd designs/proteus/cellift
 ```
 
 This exercises all 10 pipeline steps with minimal data (~5 min). Check `results/unmasked/welch_summary.txt` for a `first_leaky_cycle` value to confirm end-to-end correctness.
+
+### Checks
+
+```bash
+make check                  # all three (the last needs the toolchain)
+make check-no-host-paths    # no absolute /home/... or /mnt/... paths in the tree
+make check-csvlog-notrace   # no csvlog .core file passes --trace
+make check-taintloader      # the taint-file parser rejects non-records
+```
+
+The first two are plain greps over the tracked tree and are exempt from the
+`env.sh` gate, so they run on a bare clone. `check-no-host-paths` exists because
+absolute paths from a developer's machine break every other clone -- one of them
+previously made the evaluation fail with `mkdir: cannot create directory`.
+`check-taintloader` covers a parser defect where a `#` comment line was accepted
+as a taint record and pushed with a stale length, which reached 110M loader
+iterations and 45 GiB resident.
 
 ## Running an Evaluation
 
@@ -326,7 +379,13 @@ Three cores are required. Copy from `designs/proteus/cellift/` and substitute:
 
 **Compiler flags** (important for performance):
 - `run_cellift_fasttrace.core`: `-O2`, no `-g`, `--trace` (produces a 10–20 MB binary, ~75k cycles/min)
-- `run_cellift_csvlog.core`: same flags as fasttrace, but links `toplevel_csv.cc`
+- `run_cellift_csvlog.core`: the same `-O2` flags, links `toplevel_csv.cc`, and
+  **must not pass `--trace`**. The CSV logger has no dump call of its own, but the
+  shared `dv/testbench.h` dumps and flushes a waveform every cycle under
+  `#if VM_TRACE`, which `--trace` is what defines. With the flag it writes a full
+  VCD that the runners then discard at `/dev/null`: about 6x slower per trace, and
+  fatal on a `POWER_LEAKAGE_FLATTEN=1` build (26 GB resident, OOM at SIMLEN=100).
+  `make check-csvlog-notrace` asserts this.
 - `run_vanilla_trace.core`: same flags, omits the instrumented RTL file
 
 ---
@@ -456,9 +515,9 @@ The following issues arose during the Proteus and Rocket integrations and are wo
 | 3 | SRAM writes not executing | Set `req_i` for both reads and writes, not only reads |
 | 4 | AXI `rdata` always zero | Connect `rdata_o` to the AXI response bus (can be left unconnected in plain-memory models) |
 | 5 | Stack overlapping tainted key data | Reorder linker sections so key region is isolated; verify with `nm` |
-| 6 | Taint file parse errors | Remove all `#`-prefixed lines; the parser interprets `#` as a hex address |
+| 6 | Taint file parse errors | Fixed in `design-processing/common/dv/taintloader.cc`: blank and `#`-prefixed lines are skipped and a malformed line is reported. Previously a comment line failed every field extraction and the section was pushed with stale stack values, including its length — measured at 110M+ loader iterations and 45 GiB resident |
 | 7 | CellIFT binary 200+ MB, 50 cycles/min | Missing `-O2` in FuseSoC `.core`; add `-O2 -CFLAGS "-O2"`, drop `-O0 -g` |
-| 8 | Verilator `rootp->` signal errors | `--trace` must be present in all `.core` files; use `TRACEFILE=/dev/null` to suppress VCD output |
+| 8 | Verilator `rootp->` signal errors | Expose the signal as a real module **output port**. A `rootp->..._DOT__` name disappears as soon as Verilator collapses a pass-through wrapper wire into the submodule's own signal, which is what happens when the instrumentation scope widens. Do **not** add `--trace` to a csvlog target to work around it: that makes the CSV logger write a full waveform every cycle (~6x slower, and OOM on a flattened build) — see the comment in `run_cellift_csvlog.core` |
 | 9 | `pc_at_leakage.py` reports wrong instruction | VCD timing offset wrong; re-check `kResetLength` in `testbench.h` and update the timing formula |
 
 ---
@@ -488,6 +547,29 @@ The Yosys pass (`tools/sparc-sca-yosys/passes/cellift/`) adds three signal layer
 **Combinational cells** (`cells/{add,and,mux,or,xor}.cc`): use the conservative model `leak = taint`, which is sound (no false negatives) because combinational transitions occur within the same cycle as their tainted inputs.
 
 **Aggregation counters**: `hamming_weight_counter_t0` (popcount of active tainted bits) and `hamming_distance_counter_t0` (popcount of tainted transitions) are inserted as 32-bit output ports at the designated scope module.
+
+### Instrumentation options
+
+`design-processing/common/yosys/instrument.ys.tcl` exposes the pass through
+environment variables. The defaults reproduce the published configuration, so
+none of these needs to be set.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `POWER_LEAKAGE_SCOPE` | `top` | `top` instruments the top module only, `auto` every module carrying taint and aggregates bottom-up, and a comma-separated module list instruments exactly those. |
+| `POWER_LEAKAGE_FLATTEN` | `0` | Flatten before instrumenting. HD counters need a clock, and the pass registers a net's previous value in the module that owns it, so a purely combinational submodule can never contribute to HD at any scope. Flattening moves those nets into the top module, which has one. |
+| `POWER_LEAKAGE_INCLUDE_SIGNALS` | _(empty)_ | Comma-separated name substrings restricting which wires feed the counters; taint propagation is unaffected. This is the escape hatch from the cost of a flattened build: the counters chain one adder per tainted bit, so a flattened Ibex reaches 16029 bits and over 17 minutes for a 30k-cycle trace, while naming `register_file_i` costs about 1160. |
+| `POWER_LEAKAGE_SKIP_PURGE` | `0` | Skip the `opt -purge` after the pass, for a one-off diagnostic build. |
+| `POWER_LEAKAGE_HD_TAINT_PREV` | `0` | Gate HD on `(taint \| taint_prev)` rather than current-cycle taint. |
+
+**Leave `POWER_LEAKAGE_HD_TAINT_PREV` at 0 unless you know why you want it.** The
+strict gate scores exactly zero when a tainted value is overwritten by an
+untainted one, even though that transition is key-dependent, so the loose gate is
+the more conservative model. But it over-approximates in a way that *invents
+structure*: measured on Ibex masked AES with the register file instrumented, it
+added five cycles forming a clean one-per-round grid attributing to AddRoundKey
+that vanishes entirely under the strict gate. For attribution that is worse than
+useless. It also changes every HD number this repository publishes.
 
 ## Instrumentation Correctness Properties
 
@@ -527,8 +609,8 @@ All tools are git submodules and are built either via `make installtools` or ins
 
 | Tool | Role |
 |------|------|
-| [sparc-sca-yosys](https://github.com/aneskovic/sparc-sca-yosys) | RTL instrumentation (CellIFT + leakage extension) |
-| [Verilator](https://github.com/aneskovic/sparc-sca-verilator) | Cycle-accurate RTL simulation |
+| [sparc-sca-yosys](https://github.com/iti-luebeck/sparc-sca-yosys) | RTL instrumentation (CellIFT + leakage extension) |
+| [Verilator](https://github.com/iti-luebeck/sparc-sca-verilator) | Cycle-accurate RTL simulation |
 | [sv2v](https://github.com/zachjs/sv2v) | SystemVerilog to Verilog conversion |
 | [riscv-gnu-toolchain](https://github.com/riscv/riscv-gnu-toolchain) | Cross-compiler for AES/Kyber firmware |
 | [riscv-isa-sim](https://github.com/riscv-software-src/riscv-isa-sim) | RISC-V ISA reference simulator (Spike) |

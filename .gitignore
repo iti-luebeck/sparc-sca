@@ -25,3 +25,8 @@ paper/
 .vscode/
 DS_Store
 .DS_Store
+# Matplotlib config written by in-container runs
+.matplotlib/
+
+# Local Yosys rebuild prefix
+tools/_yosys-local/

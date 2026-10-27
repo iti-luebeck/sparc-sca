@@ -35,7 +35,16 @@ unset CELLIFT_DESIGN
 
 # Where to install the binaries and other files of all the tools
 # (compiler toolchain, verilator, sv2v, etc.)
-export PREFIX_CELLIFT=$HOME/prefix-cellift
+#
+# Honour a value already in the environment. The Docker image sets this to
+# /opt/sparc-sca, where its toolchain actually lives; overwriting it
+# unconditionally pointed RISCV, CELLIFT_PYTHON_VENV and LD_LIBRARY_PATH at a
+# host path that does not exist inside the container. The scenario Makefiles
+# use $(RISCV)/bin/... when RISCV is set, so `source env.sh` inside the
+# container made every scenario fail to build with "No such file or
+# directory", while PATH still resolved the compiler and made most other
+# things appear to work. Unset, this behaves exactly as before.
+export PREFIX_CELLIFT=${PREFIX_CELLIFT:-$HOME/prefix-cellift}
 
 # How many parallel jobs would you like to have issued?
 export CELLIFT_JOBS=250 # Feel free to change this
@@ -64,8 +73,8 @@ export CELLIFT_PYTHON_VENV=$PREFIX_CELLIFT/python-venv
 
 # RISCV toolchain location
 export RISCV=$PREFIX_CELLIFT/riscv
-#export RISCV=/mnt/nvme1n1p1/chipyard-1.8.1/.conda-env/riscv-tools
-#export RISCV=/mnt/nvme1n1p1/chipyard-CellIFT/esp-tools-install/
+# To use a toolchain installed elsewhere (e.g. a Chipyard conda env), export
+# RISCV before sourcing this file.
 # Have we been sourced?
 export CELLIFT_ENV_SOURCED=yes
 
