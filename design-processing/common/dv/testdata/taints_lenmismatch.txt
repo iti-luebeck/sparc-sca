@@ -1,0 +1,4 @@
+# A declared length that disagrees with the mask, which is how the AES
+# templates tainted 3 of Ibex's 4 key words: '10' is 16 bytes written as hex,
+# but the length field is decimal, so the loader tainted (10+3)/4 = 3 words.
+0 c00 10 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF

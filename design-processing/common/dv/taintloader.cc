@@ -113,6 +113,29 @@ extern "C" void read_taints(const char* filename) {
       continue;
     }
 
+    // The length is DECIMAL and counted in bytes, and the mask already states
+    // it: read_taint_section writes strlen/2 bytes. When the two disagree the
+    // mask is authoritative for CONTENT while the length alone decides how many
+    // words get tainted, so a wrong length silently taints the wrong amount --
+    // which is how the AES templates came to cover 3 of Ibex's 4 key words.
+    // Their '10' meant 16 bytes to whoever wrote it and 10 to this parser, and
+    // (10 + 4-1)/4 = 3 words, leaving key bytes 12..15 clean. Nothing in the
+    // flow noticed for the length of a paper.
+    //
+    // Warn rather than exit: by the time this runs the simulation is already
+    // elaborating, and a taint file is worth loading partially. Use
+    // python_scripts/check_scenario.py to catch it before a run instead.
+    const uint64_t mask_bytes = byte_taint_contents.size() / 2;
+    if (byte_taint_contents.size() % 2 != 0) {
+      std::cerr << "taintloader: warning: mask has an odd number of hex digits: "
+                << tmp_line << std::endl;
+    }
+    if (mask_bytes != num_bytes) {
+      std::cerr << "taintloader: warning: line declares " << num_bytes
+                << " bytes but the mask carries " << mask_bytes
+                << " (the length is decimal, in bytes): " << tmp_line << std::endl;
+    }
+
     taint_sections[taint_id].push_back(std::make_pair(region_offset, num_bytes));
     taint_assignments[taint_id][region_offset] = byte_taint_contents;
   }

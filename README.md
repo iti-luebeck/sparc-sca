@@ -425,24 +425,52 @@ nm build/app.elf | grep aes_key
 
 ### Step 8 — Configure taint data
 
-Create `taint_data/<scenario>/taint_data.txt`. Format — one line per tainted region, no comments:
+Create `taint_data/<scenario>/taint_data.txt`. Format — one line per tainted region:
 
 ```
-<taint_id> <offset_hex> <length_bytes_hex> <taint_mask_hex>
+<taint_id> <offset_hex> <length_bytes_decimal> <taint_mask_hex>
 ```
 
-Example for 16-byte AES key at offset `0x900`:
+**The address is hex and the length is decimal.** They are read differently
+(`taintloader.cc`), and the mixed radix has cost real results: the AES
+templates used to declare a 16-byte key as `10`, meaning hex, and the loader
+read 10. The length decides how many SRAM words are tainted —
+`ceil(length / word_bytes)` — so on Ibex's 32-bit SRAM that tainted 3 words
+instead of 4 and key bytes 12–15 were never marked. The loader now warns when
+the length disagrees with the mask, which is the redundancy that catches this.
+
+Example for a 16-byte AES key at offset `0x900`:
 ```
-0 900 10 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+0 900 16 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 ```
 
-For first-order Boolean masking (key XOR mask), add a second line for the mask share:
+For first-order Boolean masking, taint `aes_key_share0` at its own offset and
+taint **one** share only — marking both shares marks the reconstructed key, and
+the taint then follows the recombination everywhere, which is the result the
+masking is meant to prevent:
 ```
-0 900 10 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-0 B00 10 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+0 B00 16 FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
 ```
 
-> **Note**: The parser treats `#` as the start of an address, not a comment. Do not add comment lines.
+Blank lines and `#` comment lines are skipped, and a line that is not a valid
+record is reported on stderr and ignored.
+
+Addresses are relative to whatever the design's SRAM sees, which is not always
+the ELF address: Ibex and Rocket use the ELF address directly, while Proteus's
+SoC indexes its SRAM with `axi_arw_payload_addr[21:4]` and so drops the
+`0x8000_0000` base.
+
+> **Verify it, do not hand-maintain it.** A taint file names addresses in a
+> layout the toolchain is free to move, and a stale address does not fail — it
+> taints whatever now sits there. Check a scenario against its own ELF with:
+>
+> ```bash
+> python3 design-processing/common/python_scripts/check_scenario.py \
+>     designs/ibex/cellift --workload aes scenario_aes128_key1
+> ```
+>
+> and write the file the ELF implies with `--write-taint`. `make check` runs
+> this over every template whose ELF is built.
 
 ---
 

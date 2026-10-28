@@ -165,8 +165,8 @@ cleantools:
 
 # ── Checks ────────────────────────────────────────────────────────────────────
 # Two defects that were silent in the flow and are cheap to assert against.
-.PHONY: check check-taintloader check-csvlog-notrace
-check: check-csvlog-notrace check-taintloader check-no-host-paths
+.PHONY: check check-taintloader check-csvlog-notrace check-taint-scenarios
+check: check-csvlog-notrace check-taintloader check-no-host-paths check-taint-scenarios
 
 # Absolute paths from a developer's machine must never reach a published tree:
 # they break on every other clone and leak the author's directory layout. Before
@@ -214,7 +214,8 @@ check-csvlog-notrace:
 	exit $$fail
 
 # taintloader.cc must reject non-records instead of pushing them with whatever
-# is on the stack. Needs the container toolchain for svdpi.h.
+# is on the stack, and must say so when a line's declared length disagrees with
+# its mask. Needs the container toolchain for svdpi.h.
 check-taintloader:
 	@svdpi=$$(dirname $$(find $(PREFIX_CELLIFT) -name svdpi.h 2>/dev/null | head -1)); \
 	test -n "$$svdpi" || { echo "svdpi.h not found under $(PREFIX_CELLIFT)"; exit 1; }; \
@@ -222,6 +223,35 @@ check-taintloader:
 	    design-processing/common/dv/test_taintloader.cc \
 	    design-processing/common/dv/taintloader.cc && \
 	/tmp/test_taintloader design-processing/common/dv/testdata/taints_commented.txt 2
+	@/tmp/test_taintloader design-processing/common/dv/testdata/taints_lenmismatch.txt 1 \
+	    2>&1 | grep -q 'taintloader: warning: line declares 10 bytes but the mask carries 16' \
+	  && echo "  PASS length/mask mismatch is reported" \
+	  || { echo "  FAIL length/mask mismatch was accepted silently"; exit 1; }
+
+# A taint file names byte addresses in an ELF that the toolchain is free to
+# lay out differently, and nothing used to compare the two. The published
+# Kyber files pointed 0x600 (Ibex, Proteus) and 0x80 (Rocket) past kyber_sk,
+# so the simulation tainted the tail of the public key instead of the secret
+# and still produced a perfectly plausible t-curve.
+#
+# Only scenarios whose ELF is already built can be checked, so this is a skip
+# on a fresh clone rather than a failure. Run it after build-<design>.
+CHECK_SCENARIO := design-processing/common/python_scripts/check_scenario.py
+check-taint-scenarios:
+	@fail=0; any=0; \
+	for d in designs/ibex/cellift designs/proteus/cellift designs/chipyard/cellift-rocket; do \
+	  [ -f "$$d/gen_scenarios.py" ] || continue; \
+	  for w in aes kyber; do \
+	    scen=$$(cd $$d && python3 -c "from gen_scenarios import WORKLOADS as W; t=W.get('$$w',{}).get('templates',{}); print(' '.join(sorted({s for g in t.values() for s in g.values()})))" 2>/dev/null); \
+	    [ -n "$$scen" ] || continue; \
+	    out=$$(python3 $(CHECK_SCENARIO) $$d --workload $$w $$scen 2>&1); rc=$$?; \
+	    if [ $$rc -eq 2 ]; then echo "skip $$d $$w (no ELF built)"; \
+	    elif [ $$rc -ne 0 ]; then echo "FAIL $$d $$w:"; echo "$$out" | sed 's/^/    /'; fail=1; any=1; \
+	    else echo "ok   $$d $$w"; any=1; fi; \
+	  done; \
+	done; \
+	[ $$any -eq 1 ] || echo "note: nothing checked -- build a design first"; \
+	exit $$fail
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 .PHONY: docker-pull docker-build docker-push docker-run docker-run-ro
