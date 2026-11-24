@@ -24,6 +24,12 @@ ARG JOBS=4
 # 33eb59a = release 2026.10.26: GCC 16.1.0, binutils 2.47, newlib 4.6.0.
 ARG RISCV_GNU_TOOLCHAIN_REF=33eb59addcd65b8fd71f69fb42ccd2ea31bcbaf1
 
+# Rust builds morty and bender. Pinned for the same reason as the RISC-V
+# toolchain: `stable` is whatever rustup serves on the day, and morty's
+# Cargo.lock pins time 0.3.30, which no longer compiles from Rust 1.100 on
+# (E0282). 1.99.1 is the release the 2026-10-27 image was built with.
+ARG RUST_VERSION=1.99.1
+
 # Second, independent toolchain: CURRENT UPSTREAM Yosys and Verilator, installed
 # beside the CellIFT fork rather than replacing it.
 #
@@ -83,8 +89,9 @@ RUN mkdir -p ${PREFIX}/bin ${PREFIX}/riscv
 # ── Rust (for morty + bender) ────────────────────────────────────────────────
 ENV CARGO_HOME=${PREFIX}/.cargo \
     RUSTUP_HOME=${PREFIX}/.rustup
+ARG RUST_VERSION
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain stable --no-modify-path
+    | sh -s -- -y --default-toolchain ${RUST_VERSION} --no-modify-path
 ENV PATH=${PREFIX}/.cargo/bin:${PATH}
 
 # ── Spike — RISC-V ISA simulator ─────────────────────────────────────────────
