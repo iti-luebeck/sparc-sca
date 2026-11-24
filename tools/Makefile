@@ -72,6 +72,16 @@ install_verilator: | $(LOGFILES)
 	  >$(LOGFILES)/verilator.log 2>&1
 
 # ── Yosys with CellIFT + power-leakage extension ─────────────────────────────
+# The cellift pass is compiled into the yosys binary, not loaded as a plugin, so
+# any change under sparc-sca-yosys/passes/cellift/ needs this target rerun before
+# it affects a single netlist. Nothing warns you: the stock binary keeps
+# producing a perfectly valid cellift.sv, just without your change in it.
+#
+# Inside the published container PREFIX_CELLIFT is /opt/sparc-sca, which is
+# root-owned, so override it:
+#     ./sparc.sh make -C tools install_yosys PREFIX_CELLIFT=/workspace/tools/_yosys-local
+# and prepend that prefix's bin/ to PATH for the instrumentation step. See
+# BUILD_YOSYS_LOCALLY.md.
 .PHONY: install_yosys
 # YOSYS_ENABLE_ABC=0 skips building ABC, which the instrumentation flow never
 # calls (no `abc` anywhere in design-processing/common/yosys/). Useful for a

@@ -6,7 +6,8 @@
 designs/
 
 # ── Tool submodules not built from source in Docker ──────────────────────────
-# (using apt RISC-V toolchain instead of building from source)
+# (cloned inside the build at RISCV_GNU_TOOLCHAIN_REF, the same commit this
+#  submodule pins -- see the Dockerfile and `make check-toolchain-pin`)
 tools/riscv-gnu-toolchain/
 # (using pre-built sv2v binary)
 tools/sv2v/

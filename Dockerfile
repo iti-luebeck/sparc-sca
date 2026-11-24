@@ -15,6 +15,36 @@ ARG UBUNTU_VERSION=22.04
 ARG PREFIX=/opt/sparc-sca
 ARG JOBS=4
 
+# The RISC-V GNU toolchain is cloned inside the build rather than copied from
+# tools/riscv-gnu-toolchain (see the builder stage), so it is pinned here and
+# this ref must equal that submodule's commit. It decides the GCC every scenario
+# is compiled with, and a different GCC emits a different program from the same
+# source -- every cycle count moves. A full commit SHA, not a tag, so it cannot
+# move and `make check-toolchain-pin` can compare it with the submodule offline.
+# 33eb59a = release 2026.10.26: GCC 16.1.0, binutils 2.47, newlib 4.6.0.
+ARG RISCV_GNU_TOOLCHAIN_REF=33eb59addcd65b8fd71f69fb42ccd2ea31bcbaf1
+
+# Second, independent toolchain: CURRENT UPSTREAM Yosys and Verilator, installed
+# beside the CellIFT fork rather than replacing it.
+#
+# Why both: the SPARC flow depends on the forked Yosys in tools/sparc-sca-yosys
+# (the cellift pass is compiled into the binary, not loaded as a plugin) and on
+# the patched Verilator in tools/verilator. Neither can be swapped for upstream.
+# But upstream brings things the fork does not have -- notably the slang
+# SystemVerilog frontend, which reads heavily parameterised SV directly and can
+# stand in for the morty + sv2v stages.
+#
+# The two never collide: PATH keeps resolving `yosys`/`verilator` to the SPARC
+# toolchain, and the upstream pair is reached only through $UPSTREAM_YOSYS /
+# $UPSTREAM_VERILATOR.
+ARG UPSTREAM_PREFIX=/opt/upstream
+ARG UPSTREAM_YOSYS_TAG=v0.70
+ARG UPSTREAM_VERILATOR_TAG=v5.052
+
+# Source commit of this build, recorded as an OCI label so a published image
+# names the tree it came from. `make docker-build` passes it.
+ARG VCS_REF=unknown
+
 # ══════════════════════════════════════════════════════════════════════════════
 # STAGE 1 — builder: compile every tool and install to ${PREFIX}
 # ══════════════════════════════════════════════════════════════════════════════
@@ -74,7 +104,7 @@ RUN cd /build/yosys && \
     make PREFIX=${PREFIX} install && \
     rm -rf /build/yosys
 
-# ── Verilator (FST scratch files honour $TMPDIR) ─────────────────────────────────
+# ── Verilator (with FST integer-overflow fix) ─────────────────────────────────
 COPY tools/verilator/ /build/verilator/
 RUN cd /build/verilator && \
     autoconf && \
@@ -107,8 +137,15 @@ RUN LIBGIT2_SYS_USE_PKG_CONFIG=1 \
 # Cloned directly inside Docker — avoids requiring the multi-GB submodule tree
 # (gcc, binutils, llvm, glibc…) to be checked out on the host.
 # Only the sub-submodules needed for a bare-metal newlib build are fetched.
-RUN git clone --depth 1 https://github.com/riscv/riscv-gnu-toolchain.git /build/riscv-gnu-toolchain && \
+# Cloned at RISCV_GNU_TOOLCHAIN_REF, the same commit tools/riscv-gnu-toolchain
+# pins. It used to clone master, so the GCC in the image was whatever upstream
+# had on the day of the build and silently differed from the pinned one.
+ARG RISCV_GNU_TOOLCHAIN_REF
+RUN git init -q /build/riscv-gnu-toolchain && \
     cd /build/riscv-gnu-toolchain && \
+    git remote add origin https://github.com/riscv/riscv-gnu-toolchain.git && \
+    git fetch -q --depth 1 origin ${RISCV_GNU_TOOLCHAIN_REF} && \
+    git checkout -q FETCH_HEAD && \
     git submodule update --init --depth 1 binutils gcc newlib && \
     ./configure \
         --prefix=${PREFIX}/riscv \
@@ -136,18 +173,75 @@ RUN python3 -m venv ${PREFIX}/python-venv && \
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# STAGE 1b — upstream-builder: current Yosys (with slang) and Verilator 5
+#
+# Deliberately a SEPARATE stage from the builder above. That one compiles the
+# CellIFT Yosys and the patched Verilator with the distro's default gcc-11;
+# upstream Yosys needs C++20, CMake >= 3.28 and Python >= 3.11, and setting
+# CC/CXX to gcc-12 for those would silently change how the SPARC tools are
+# built too. Isolating it keeps the SPARC toolchain unaffected by this addition.
+#
+# Stays on the same Ubuntu release as the runtime so the glibc matches.
+# ══════════════════════════════════════════════════════════════════════════════
+FROM ubuntu:${UBUNTU_VERSION} AS upstream-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG JOBS=4
+ARG UPSTREAM_PREFIX
+ARG UPSTREAM_YOSYS_TAG
+ARG UPSTREAM_VERILATOR_TAG
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential g++-12 gcc-12 lld bison flex gawk git ca-certificates \
+      tcl-dev libreadline-dev libffi-dev zlib1g-dev pkg-config \
+      python3 python3-pip python3.11 \
+      autoconf help2man perl libfl-dev ccache ninja-build \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip3 install --no-cache-dir "cmake>=3.28,<4"
+
+ENV CC=gcc-12 CXX=g++-12
+
+# Upstream Yosys. --recurse-submodules is what pulls in the slang frontend;
+# without it the build succeeds and `read_slang` simply does not exist.
+RUN git clone --depth 1 --branch ${UPSTREAM_YOSYS_TAG} \
+      --recurse-submodules --shallow-submodules \
+      https://github.com/YosysHQ/yosys.git /build/yosys && \
+    cd /build/yosys && \
+    cmake -B build -G Ninja . \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=${UPSTREAM_PREFIX} \
+      -DPython3_EXECUTABLE=/usr/bin/python3.11 \
+      -DYOSYS_ENABLE_UNIT_TESTS=OFF && \
+    cmake --build build --parallel ${JOBS} && \
+    cmake --install build --strip && \
+    rm -rf /build/yosys
+
+# Verilator 5. The SPARC simulation flow keeps using the patched Verilator 4
+# from tools/verilator; this one is for host-side lint and elaboration.
+RUN git clone --depth 1 --branch ${UPSTREAM_VERILATOR_TAG} \
+      https://github.com/verilator/verilator.git /build/verilator && \
+    cd /build/verilator && autoconf && \
+    ./configure --prefix=${UPSTREAM_PREFIX} && \
+    make -j${JOBS} && make install && \
+    rm -rf /build/verilator
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # STAGE 2 — runtime: lean image with pre-built tools only
 # ══════════════════════════════════════════════════════════════════════════════
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
 
 # OCI image metadata — links the GHCR package to the source repo and populates
 # the package description. (Labels on the runtime stage end up in the shipped image.)
+ARG VCS_REF
 LABEL org.opencontainers.image.source="https://github.com/iti-luebeck/sparc-sca"
-LABEL org.opencontainers.image.description="SPARC-SCA prebuilt environment: CellIFT Yosys, Verilator, Spike, sv2v and the RISC-V toolchain, ready to run the power side-channel leakage evaluation."
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.description="SPARC-SCA prebuilt environment: CellIFT Yosys, Verilator, Spike, sv2v and the RISC-V toolchain, ready to run the power side-channel leakage evaluation. Also ships upstream Yosys (with slang) and Verilator 5 under /opt/upstream."
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PREFIX=/opt/sparc-sca
+ARG UPSTREAM_PREFIX
 
 # ── Runtime libraries only ───────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -172,6 +266,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make ninja-build git curl wget perl \
     # Misc utilities
     ca-certificates unzip gnupg \
+    # Upstream toolchain runtime: Verilator 5 emits C++20, so it needs a newer
+    # compiler than the g++ above; gawk and ccache are on Verilator's own
+    # runtime dependency list, and `time` is what the flow scripts measure with.
+    g++-12 gawk ccache time \
   && rm -rf /var/lib/apt/lists/*
 
 # ── Java + sbt ────────────────────────────────────────────────────────────────
@@ -210,11 +308,18 @@ ENV JAVA_HOME_17=/usr/lib/jvm/java-17-openjdk-amd64
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 ENV PATH=/usr/lib/jvm/java-11-openjdk-amd64/bin:${PATH}
 
-# ── Copy the installed tool prefix from the builder ──────────────────────────
+# ── Copy the installed tool prefixes from the builders ───────────────────────
 COPY --from=builder ${PREFIX} ${PREFIX}
+COPY --from=upstream-builder ${UPSTREAM_PREFIX} ${UPSTREAM_PREFIX}
 # Readable and traversable for any uid, so the image also works when run with
 # --user $(id -u):$(id -g) instead of as root.
-RUN chmod -R a+rX ${PREFIX}
+RUN chmod -R a+rX ${PREFIX} ${UPSTREAM_PREFIX}
+
+# Upstream Yosys links shared libraries out of its own prefix. It is added to
+# the loader path, NOT to PATH: `yosys` and `verilator` must keep resolving to
+# the SPARC toolchain, or every existing flow silently changes tool underneath
+# itself.
+RUN echo ${UPSTREAM_PREFIX}/lib > /etc/ld.so.conf.d/upstream.conf && ldconfig
 # MPLCONFIGDIR points inside ${PREFIX}, which the line above makes readable but
 # not writable. Matplotlib wants to write a font cache there on first import, so
 # a non-root user gets "not a writable directory" and a fresh temporary cache per
@@ -249,7 +354,11 @@ ENV PREFIX_CELLIFT=${PREFIX} \
     CELLIFT_PYTHON_COMMON=/workspace/design-processing/common/python_scripts \
     CELLIFT_YS=/workspace/design-processing/common/yosys \
     OPENTITAN_ROOT=/workspace/external-dependencies/cellift-opentitan \
-    MPLCONFIGDIR=${PREFIX}/matplotlib
+    MPLCONFIGDIR=${PREFIX}/matplotlib \
+    UPSTREAM_PREFIX=${UPSTREAM_PREFIX} \
+    UPSTREAM_YOSYS=${UPSTREAM_PREFIX}/bin/yosys \
+    UPSTREAM_YOSYS_CONFIG=${UPSTREAM_PREFIX}/bin/yosys-config \
+    UPSTREAM_VERILATOR=${UPSTREAM_PREFIX}/bin/verilator
 
 # SBT heap/stack — large Chisel designs (Rocket) need ≥4 GB heap.
 # Use JAVA_TOOL_OPTIONS (picked up by all JVM invocations automatically)
@@ -260,6 +369,13 @@ ENV JAVA_TOOL_OPTIONS="-Xmx8G -Xss8M"
 ENV PATH=${PREFIX}/python-venv/bin:${PREFIX}/bin:${PREFIX}/riscv/bin:/usr/local/bin:${PATH}
 
 RUN mkdir -p ${MPLCONFIGDIR} /workspace
+
+# Home for a non-root run (sparc.sh runs as the host UID with HOME=/sbt-home and
+# -Duser.home=/sbt-home, then mounts the host's sbt/ivy/coursier caches beneath
+# it). Docker auto-creates any missing parent of a mount point as root:root
+# 0755, which that user cannot write -- sbt then fails to create .cache/sbt.
+# Pre-creating both world-writable means Docker only adds the leaf mount points.
+RUN mkdir -p /sbt-home/.cache && chmod 777 /sbt-home /sbt-home/.cache
 
 # ── Shell experience ──────────────────────────────────────────────────────────
 # Colored prompt: sparc-sca:/path$ — cyan label, blue path
@@ -284,6 +400,15 @@ RUN yosys --version && \
     yosys -p 'help cellift' 2>/dev/null | grep -q -- '-track-power-leakage' && \
     yosys -p 'help cellift' 2>/dev/null | grep -q -- '-hd-taint-prev' && \
     yosys -p 'help cellift' 2>/dev/null | grep -q -- '-power-leakage-include-signals' && \
+    # Upstream pair, reached only through the UPSTREAM_* variables -- and PATH
+    # must still resolve to the SPARC pair, which is what the flow runs.
+    ${UPSTREAM_YOSYS} -V && \
+    ${UPSTREAM_VERILATOR} --version && \
+    # slang is the reason upstream Yosys is here at all; without the submodule
+    # the build succeeds and read_slang simply does not exist.
+    ${UPSTREAM_YOSYS} -p 'help read_slang' > /dev/null 2>&1 && \
+    test "$(command -v yosys)" = "${PREFIX}/bin/yosys" && \
+    test "$(command -v verilator)" = "${PREFIX}/bin/verilator" && \
     sv2v --version && \
     spike --version 2>&1 | head -1 && \
     morty --help > /dev/null 2>&1 && \

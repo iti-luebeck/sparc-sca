@@ -7,11 +7,12 @@ SHELL := /bin/bash
 # Docker targets never need env.sh.
 # generate-rtl calls sbt/Java directly — no CellIFT env required.
 # help must work on a fresh clone — it is what tells you to source env.sh.
-# check-no-host-paths and check-csvlog-notrace are pure greps over the tree, so
-# they must work on a bare clone -- they are the pre-publication checks.
+# check-no-host-paths, check-csvlog-notrace and check-toolchain-pin are pure
+# greps over the tree, so they must work on a bare clone -- they are the
+# pre-publication checks.
 # `check` itself is not exempt: it also runs check-taintloader, which compiles
 # against the container/native toolchain and so needs the environment.
-EXEMPT_TARGETS := help docker-pull docker-build docker-push docker-run docker-run-ro checkout-designs checkout-tools generate-rtl check-no-host-paths check-csvlog-notrace
+EXEMPT_TARGETS := help docker-pull docker-build docker-push docker-run docker-run-ro checkout-designs checkout-tools generate-rtl check-no-host-paths check-csvlog-notrace check-toolchain-pin
 # An empty MAKECMDGOALS means the default goal (help), which is also exempt.
 ifneq (,$(MAKECMDGOALS))
 ifeq (,$(filter $(EXEMPT_TARGETS),$(MAKECMDGOALS)))
@@ -61,6 +62,13 @@ help:
 	@echo "    make docker-build       build the sparc-sca Docker image from source"
 	@echo "    make docker-run         start interactive shell with repo mounted (rw)"
 	@echo "    make docker-run-ro      start interactive shell with repo mounted (ro)"
+	@echo "    ./sparc.sh <cmd>        run one command in the image as your own user"
+	@echo "                            (scriptable: no TTY needed; ./sparc.sh --help)"
+	@echo ""
+	@echo "  Checks:"
+	@echo "    make check              all checks below (needs env.sh or the image)"
+	@echo "    make check-no-host-paths check-csvlog-notrace check-toolchain-pin"
+	@echo "                            the pre-publication greps; work on a bare clone"
 
 # ── RTL generation (host or inside Docker, no env.sh needed) ──────────────────
 # Runs SpinalHDL and Chisel/FIRRTL elaboration to produce the design Verilog.
@@ -157,6 +165,10 @@ installtools:
 # pass is compiled INTO yosys rather than loaded as a plugin, so editing it has
 # no effect until yosys is rebuilt. `installtools` would rebuild the RISC-V
 # toolchain too (~1.5 h); this is the targeted version.
+#
+# PREFIX_CELLIFT must be writable. Inside the published container it is
+# /opt/sparc-sca, which is root-owned, so point it elsewhere and put that on
+# PATH for the instrumentation step -- see tools/BUILD_YOSYS_LOCALLY.md.
 install_yosys:
 	$(MAKE) -C tools install_yosys
 
@@ -165,8 +177,23 @@ cleantools:
 
 # ── Checks ────────────────────────────────────────────────────────────────────
 # Two defects that were silent in the flow and are cheap to assert against.
-.PHONY: check check-taintloader check-csvlog-notrace check-taint-scenarios
-check: check-csvlog-notrace check-taintloader check-no-host-paths check-taint-scenarios
+.PHONY: check check-taintloader check-csvlog-notrace check-taint-scenarios check-toolchain-pin
+check: check-csvlog-notrace check-taintloader check-no-host-paths check-taint-scenarios check-toolchain-pin
+
+# The Dockerfile clones the RISC-V toolchain itself instead of building
+# tools/riscv-gnu-toolchain, so the two pins can drift apart with nothing to
+# notice. They did: the image shipped GCC 16.1.0 from upstream master while the
+# submodule pinned 15.2.0, and a different GCC is a different program from the
+# same source. Compares against the INDEX, so it also catches an unstaged bump.
+check-toolchain-pin:
+	@df=$$(sed -n 's/^ARG RISCV_GNU_TOOLCHAIN_REF=//p' Dockerfile); \
+	sm=$$(git ls-files -s tools/riscv-gnu-toolchain | awk '{print $$2}'); \
+	if [ -n "$$df" ] && [ "$$df" = "$$sm" ]; then \
+	  echo "ok   Dockerfile and tools/riscv-gnu-toolchain both pin $$sm"; \
+	else \
+	  echo "FAIL Dockerfile RISCV_GNU_TOOLCHAIN_REF=$${df:-<unset>}"; \
+	  echo "     tools/riscv-gnu-toolchain       = $${sm:-<missing>}"; exit 1; \
+	fi
 
 # Absolute paths from a developer's machine must never reach a published tree:
 # they break on every other clone and leak the author's directory layout. Before
@@ -275,9 +302,15 @@ docker-push:
 	docker tag $(DOCKER_IMAGE):$(DOCKER_TAG) $(GHCR_IMAGE):$(PUSH_TAG)
 	docker push $(GHCR_IMAGE):$(PUSH_TAG)
 
+# VCS_REF becomes the image's org.opencontainers.image.revision label, so a
+# published image names the commit it was built from. A tree with uncommitted
+# changes is marked -dirty rather than labelled with a commit it does not match.
+# Changes inside a submodule's own work tree are ignored; a moved pin is not.
+VCS_REF ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)$(shell git diff --quiet --ignore-submodules=dirty HEAD -- 2>/dev/null || echo -dirty)
 docker-build:
 	docker build \
 	  --build-arg JOBS=$$(nproc) \
+	  --build-arg VCS_REF=$(VCS_REF) \
 	  -t $(DOCKER_IMAGE):$(DOCKER_TAG) \
 	  .
 
