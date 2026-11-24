@@ -109,6 +109,37 @@ make docker-push PUSH_TAG=$(date +%F)   # publish a dated tag first
 make docker-push                        # then move :latest to the same build
 ```
 
+**Image tags.** `v1.0` is the original release image and is never moved. Dated
+tags (`2026-10-27`, …) are later builds of `main`, and `latest` points at the
+newest of them. Each image built by `make docker-build` records its
+source commit in the `org.opencontainers.image.revision` label:
+
+```bash
+docker image inspect ghcr.io/iti-luebeck/sparc-sca:latest \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
+
+**Running a single command without an interactive shell.** `make docker-run`
+needs a TTY. `./sparc.sh` runs one command in the image as your own user, from
+your current directory inside the repository, so it works from scripts and CI
+and leaves no root-owned files behind:
+
+```bash
+./sparc.sh make build-ibex
+cd designs/proteus/cellift && ../../../sparc.sh ./run_full_evaluation.sh --n-unmasked 2 --n-masked 2 --simlen 3000
+./sparc.sh shell                           # interactive, as your own user
+```
+
+It uses the local `sparc-sca:latest` if there is one, otherwise
+`ghcr.io/iti-luebeck/sparc-sca:latest`; `./sparc.sh --help` lists the options.
+
+**A second, upstream toolchain.** Besides the SPARC tools on `PATH`, the image
+carries current upstream Yosys (with the slang SystemVerilog frontend) and
+Verilator 5 under `/opt/upstream`, reached only through `$UPSTREAM_YOSYS` and
+`$UPSTREAM_VERILATOR`. `yosys` and `verilator` on `PATH` remain the CellIFT fork
+and the patched Verilator 4 the evaluation flow is built on. See
+[`tools/BUILD_YOSYS_LOCALLY.md`](tools/BUILD_YOSYS_LOCALLY.md).
+
 
 **Or build the image yourself** (~2 hr — all tools compiled from source):
 
@@ -159,6 +190,14 @@ distribution package.
 To rebuild only Yosys after editing the instrumentation pass -- it is compiled
 into the binary rather than loaded as a plugin, so an edit has no effect until
 then -- use `make install_yosys` instead of the full `make installtools`.
+[`tools/BUILD_YOSYS_LOCALLY.md`](tools/BUILD_YOSYS_LOCALLY.md) covers doing the
+same inside the container and checking that the rebuild took effect.
+
+**The RISC-V GCC decides the program.** Different GCC versions emit different
+code from the same firmware source, so cycle counts and leaky-cycle indices move
+with the compiler. `tools/riscv-gnu-toolchain` and the Docker image are pinned to
+the same commit (GCC 16.1.0) and `make check-toolchain-pin` asserts it; a native
+install built from the submodule therefore matches the image.
 
 > The native route is offered as an option and is **best-effort**: it compiles
 > Yosys, Verilator, Spike and the RISC-V toolchain from source, and the system
@@ -177,13 +216,15 @@ This exercises all 10 pipeline steps with minimal data (~5 min). Check `results/
 ### Checks
 
 ```bash
-make check                  # all three (the last needs the toolchain)
+make check                  # all of the below (needs the toolchain)
 make check-no-host-paths    # no absolute /home/... or /mnt/... paths in the tree
 make check-csvlog-notrace   # no csvlog .core file passes --trace
+make check-toolchain-pin    # Dockerfile and tools/riscv-gnu-toolchain pin one commit
 make check-taintloader      # the taint-file parser rejects non-records
+make check-taint-scenarios  # taint files point at the secret in the built ELFs
 ```
 
-The first two are plain greps over the tracked tree and are exempt from the
+The first three are plain greps over the tracked tree and are exempt from the
 `env.sh` gate, so they run on a bare clone. `check-no-host-paths` exists because
 absolute paths from a developer's machine break every other clone -- one of them
 previously made the evaluation fail with `mkdir: cannot create directory`.
@@ -635,15 +676,20 @@ Evaluated on three RISC-V processors executing AES-128 (unmasked and first-order
 
 All tools are git submodules and are built either via `make installtools` or inside the Docker image.
 
-| Tool | Role |
-|------|------|
-| [sparc-sca-yosys](https://github.com/iti-luebeck/sparc-sca-yosys) | RTL instrumentation (CellIFT + leakage extension) |
-| [Verilator](https://github.com/iti-luebeck/sparc-sca-verilator) | Cycle-accurate RTL simulation |
-| [sv2v](https://github.com/zachjs/sv2v) | SystemVerilog to Verilog conversion |
-| [riscv-gnu-toolchain](https://github.com/riscv/riscv-gnu-toolchain) | Cross-compiler for AES/Kyber firmware |
-| [riscv-isa-sim](https://github.com/riscv-software-src/riscv-isa-sim) | RISC-V ISA reference simulator (Spike) |
-| [morty](https://github.com/zarubaf/morty) | SV hierarchy flattening |
-| [bender](https://github.com/pulp-platform/bender) | RTL dependency management |
+| Tool | Version | Role |
+|------|---------|------|
+| [sparc-sca-yosys](https://github.com/iti-luebeck/sparc-sca-yosys) | Yosys 0.22 + CellIFT | RTL instrumentation (CellIFT + leakage extension) |
+| [Verilator](https://github.com/iti-luebeck/sparc-sca-verilator) | 4.216 + FST fix | Cycle-accurate RTL simulation |
+| [sv2v](https://github.com/zachjs/sv2v) | v0.0.13 | SystemVerilog to Verilog conversion |
+| [riscv-gnu-toolchain](https://github.com/riscv/riscv-gnu-toolchain) | 2026.10.26 (GCC 16.1.0) | Cross-compiler for AES/Kyber firmware |
+| [riscv-isa-sim](https://github.com/riscv-software-src/riscv-isa-sim) | 1.1.1-dev | RISC-V ISA reference simulator (Spike) |
+| [morty](https://github.com/zarubaf/morty) | 0.9.0 | SV hierarchy flattening |
+| [bender](https://github.com/pulp-platform/bender) | 0.28.2 | RTL dependency management |
+
+The Docker image additionally ships two tools that are not submodules and that
+the evaluation flow does not use: upstream [Yosys](https://github.com/YosysHQ/yosys)
+v0.70 with the slang frontend and [Verilator](https://github.com/verilator/verilator)
+v5.052, under `/opt/upstream` (see `UPSTREAM_*_TAG` in the `Dockerfile`).
 
 ## Acknowledgements
 
